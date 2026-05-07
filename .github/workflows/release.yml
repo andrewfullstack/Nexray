@@ -1,0 +1,106 @@
+name: Release
+
+# Tag-driven release. Tag a commit `v*.*.*` (e.g. `v1.0.0`) and the matrix
+# below will build, sign (if secrets are populated), and attach installers to
+# a GitHub Release. The first run of this workflow against a fresh repo will
+# fail loudly — you must populate the secrets listed in the comments below.
+#
+# Required secrets (Repo → Settings → Secrets and variables → Actions):
+#
+#   APPLE_CERTIFICATE              base64 of your Developer ID .p12
+#   APPLE_CERTIFICATE_PASSWORD     password for the .p12
+#   APPLE_SIGNING_IDENTITY         e.g. "Developer ID Application: Your Name (TEAMID)"
+#   APPLE_ID                       Apple ID email
+#   APPLE_PASSWORD                 app-specific password (notarytool submit)
+#   APPLE_TEAM_ID                  10-char team identifier
+#
+#   WINDOWS_CERTIFICATE            base64 of your code-signing .pfx (or use
+#                                  Azure Trusted Signing — see workflow comments)
+#   WINDOWS_CERTIFICATE_PASSWORD   password for the .pfx
+#
+#   TAURI_SIGNING_PRIVATE_KEY      `tauri signer generate` private half
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  password for the key
+#
+# After populating, push a tag: `git tag v1.0.0 && git push origin v1.0.0`.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-14
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: ${{ matrix.target }}
+
+      - name: Install Linux Tauri deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Fetch xray-core + tun2socks + geo data
+        run: pnpm run fetch-core -- --target=${{ matrix.target }}
+        env:
+          # `fetch-core.mjs` refuses to download until the SHA-256 entries in
+          # `scripts/fetch-core.mjs` are populated. Update those constants in
+          # a separate PR before tagging a release.
+          NEXRAY_RELEASE_FETCH: "1"
+
+      - name: Build & bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Tauri updater signing.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code-signing + notarization.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows code-signing.
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Nexray ${{ github.ref_name }}"
+          releaseBody: "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)."
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}

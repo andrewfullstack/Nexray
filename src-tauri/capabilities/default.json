@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability set for the React UI: IPC commands + tauri-plugin-store + updater + tray events.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "store:default",
+    "updater:default"
+  ]
+}

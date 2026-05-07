@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js:
+    name: JS / TS (incl. CLI ↔ Zod harness)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - run: pnpm install --frozen-lockfile
+      - name: Pre-build CLI for harness test
+        run: cargo build -p nexray-cli
+      - run: pnpm verify-types
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  rust:
+    name: Rust workspace
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-22.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - name: Install Linux Tauri deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
+      - run: pnpm install --frozen-lockfile
+      - name: Cargo fmt
+        run: cargo fmt --all -- --check
+      - name: Cargo clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Cargo test (workspace)
+        run: cargo test --workspace --all-targets

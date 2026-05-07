@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS hardened-runtime entitlements.
+
+  Phase 2 stub. Phase 7 will tighten these once we actually sign + notarize:
+    - com.apple.security.app-sandbox: enable when we move to App Store
+      distribution. For Direct Distribution + notarized Developer ID we
+      can leave it off.
+    - com.apple.security.network.client: required for the xray-core sidecar
+      to make outbound connections.
+    - com.apple.security.network.server: required so the SOCKS inbound
+      can accept connections from local apps.
+    - com.apple.security.cs.allow-unsigned-executable-memory + JIT: NOT
+      enabled. We don't ship a JIT.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+</dict>
+</plist>

@@ -1,0 +1,19 @@
+[package]
+name = "xray-stub"
+description = "Test-only sidecar imposter — drains stdin, prints ready line, sleeps until killed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "xray-stub"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
