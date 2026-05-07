@@ -639,7 +639,10 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          # will still install but xray's upstream connection may loop.\n\
          LOCAL_GW=$(/sbin/route -n get default 2>/dev/null | awk '/gateway:/ {{print $2}}')\n\
          LOCAL_IF=$(/sbin/route -n get default 2>/dev/null | awk '/interface:/ {{print $2}}')\n\
-         echo \"LOCAL_GW=$LOCAL_GW LOCAL_IF=$LOCAL_IF\" >> \"$LOG\"\n\
+         # IPv6 default — gateway may include a zone-id like %en0 which\n\
+         # we must keep when adding /128 bypass routes.\n\
+         LOCAL_GW6=$(/sbin/route -n get -inet6 default 2>/dev/null | awk '/gateway:/ {{print $2}}')\n\
+         echo \"LOCAL_GW=$LOCAL_GW LOCAL_IF=$LOCAL_IF LOCAL_GW6=$LOCAL_GW6\" >> \"$LOG\"\n\
          echo \"--- tun2socks output below ---\" >> \"$LOG\"\n\
          \n\
          # Background tun2socks; stderr/stdout both → LOG.\n\
@@ -656,24 +659,38 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          # Configure utun's IPv4 address (point-to-point, /32).\n\
          /sbin/ifconfig \"$IFACE\" \"$TUN_IP\" \"$TUN_IP\" up >> \"$LOG\" 2>&1 \\\n\
            && echo \"ifconfig $IFACE up at $TUN_IP\" >> \"$LOG\"\n\
+         # And an IPv6 ULA so IPv6 traffic can also be routed at it.\n\
+         /sbin/ifconfig \"$IFACE\" inet6 fc00::1 prefixlen 128 add >> \"$LOG\" 2>&1 \\\n\
+           && echo \"ifconfig $IFACE inet6 fc00::1/128 added\" >> \"$LOG\"\n\
          \n\
-         # Bypass /32 routes: each proxy IP must reach the internet via the\n\
+         # Bypass routes: each proxy IP must reach the internet via the\n\
          # ORIGINAL default gateway, otherwise xray's upstream connection\n\
-         # to it would route back into the tunnel and loop forever.\n\
-         if [ -n \"$LOCAL_GW\" ]; then\n\
-           for IP in $BYPASS_IPS; do\n\
-             /sbin/route -n add -host \"$IP\" \"$LOCAL_GW\" >> \"$LOG\" 2>&1 \\\n\
-               && echo \"bypass: $IP -> $LOCAL_GW\" >> \"$LOG\"\n\
-           done\n\
-         fi\n\
+         # to it would route back into the tunnel and loop forever. Split\n\
+         # by address family — IPv6 needs a different `route` invocation.\n\
+         for IP in $BYPASS_IPS; do\n\
+           if [[ \"$IP\" == *:* ]]; then\n\
+             # IPv6 bypass\n\
+             if [ -n \"$LOCAL_GW6\" ]; then\n\
+               /sbin/route -n add -inet6 -host \"$IP\" \"$LOCAL_GW6\" >> \"$LOG\" 2>&1 \\\n\
+                 && echo \"bypass v6: $IP -> $LOCAL_GW6\" >> \"$LOG\"\n\
+             fi\n\
+           else\n\
+             # IPv4 bypass\n\
+             if [ -n \"$LOCAL_GW\" ]; then\n\
+               /sbin/route -n add -host \"$IP\" \"$LOCAL_GW\" >> \"$LOG\" 2>&1 \\\n\
+                 && echo \"bypass v4: $IP -> $LOCAL_GW\" >> \"$LOG\"\n\
+             fi\n\
+           fi\n\
+         done\n\
          \n\
-         # Split-default trick: 0.0.0.0/1 + 128.0.0.0/1 covers all of\n\
-         # 0.0.0.0/0 but is more specific than the existing default route,\n\
-         # so it wins. Lets us point everything at utun without having to\n\
-         # `route change default` (which is hard to roll back cleanly).\n\
+         # Split-default trick: covers all of 0.0.0.0/0 (and ::/0) with\n\
+         # /1 + /1 routes that beat the existing default by specificity.\n\
+         # Easy clean rollback (vs `route change default`).\n\
          /sbin/route -n add -net 0.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1\n\
          /sbin/route -n add -net 128.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1\n\
-         echo \"split-default routes installed via $IFACE\" >> \"$LOG\"\n\
+         /sbin/route -n add -inet6 -net ::/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         /sbin/route -n add -inet6 -net 8000::/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         echo \"split-default routes (v4+v6) installed via $IFACE\" >> \"$LOG\"\n\
          \n\
          # Cooperative shutdown loop. Polls every 0.3s.\n\
          while kill -0 \"$TUN_PID\" 2>/dev/null; do\n\
@@ -696,11 +713,15 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          # install or already been removed.\n\
          /sbin/route -n delete -net 0.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
          /sbin/route -n delete -net 128.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
-         if [ -n \"$LOCAL_GW\" ]; then\n\
-           for IP in $BYPASS_IPS; do\n\
-             /sbin/route -n delete -host \"$IP\" \"$LOCAL_GW\" >> \"$LOG\" 2>&1 || true\n\
-           done\n\
-         fi\n\
+         /sbin/route -n delete -inet6 -net ::/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         /sbin/route -n delete -inet6 -net 8000::/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         for IP in $BYPASS_IPS; do\n\
+           if [[ \"$IP\" == *:* ]]; then\n\
+             [ -n \"$LOCAL_GW6\" ] && /sbin/route -n delete -inet6 -host \"$IP\" \"$LOCAL_GW6\" >> \"$LOG\" 2>&1 || true\n\
+           else\n\
+             [ -n \"$LOCAL_GW\" ] && /sbin/route -n delete -host \"$IP\" \"$LOCAL_GW\" >> \"$LOG\" 2>&1 || true\n\
+           fi\n\
+         done\n\
          /sbin/ifconfig \"$IFACE\" down >> \"$LOG\" 2>&1 || true\n\
          echo \"routing torn down\" >> \"$LOG\"\n\
          \n\
