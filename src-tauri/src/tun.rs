@@ -509,6 +509,7 @@ fn spawn_via_osascript(
         socks_addr,
         bypass_ips,
         iface_file: &iface_file,
+        parent_pid: std::process::id(),
     });
     std::fs::write(&script_path, script)?;
     use std::os::unix::fs::PermissionsExt;
@@ -564,6 +565,13 @@ pub struct LauncherPaths<'a> {
     /// reads this after the pidfile appears so `interface_name` reflects
     /// reality, not the hint we passed in.
     pub iface_file: &'a Path,
+    /// PID of the nexray (host) process. The privileged launcher polls
+    /// this each iteration with `kill -0`; when nexray dies (Ctrl+C,
+    /// panic, SIGKILL — anything that bypasses our Drop), the launcher
+    /// notices within ~300ms and tears itself down. Without this the
+    /// kernel keeps the split-default routes installed and the user
+    /// loses internet until manual cleanup.
+    pub parent_pid: u32,
 }
 
 /// Generate the bash launcher script that the privileged osascript shell
@@ -596,6 +604,7 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          IFACE_HINT={iface:?}\n\
          PROXY=\"socks5://{socks}\"\n\
          BYPASS_IPS=\"{bypass}\"\n\
+         PARENT_PID={parent_pid}\n\
          TUN_IP=\"198.18.0.1\"\n\
          \n\
          : > \"$LOG\"\n\
@@ -692,18 +701,31 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          /sbin/route -n add -inet6 -net 8000::/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1\n\
          echo \"split-default routes (v4+v6) installed via $IFACE\" >> \"$LOG\"\n\
          \n\
-         # Cooperative shutdown loop. Polls every 0.3s.\n\
+         # Cooperative shutdown loop. Polls every 0.3s for either:\n\
+         #   1. sigfile present → user clicked Stop TUN cleanly\n\
+         #   2. parent (nexray) PID dead → app force-quit / Ctrl+C / crashed\n\
+         # Either way: SIGTERM tun2socks, fall through to the teardown\n\
+         # block below so routes/utun get cleaned up regardless of how the\n\
+         # session ended.\n\
+         REASON=\"\"\n\
          while kill -0 \"$TUN_PID\" 2>/dev/null; do\n\
            if [ -e \"$SIGFILE\" ]; then\n\
              rm -f \"$SIGFILE\"\n\
-             echo \"sigfile observed, sending SIGTERM\" >> \"$LOG\"\n\
-             kill -TERM \"$TUN_PID\" 2>/dev/null || true\n\
-             sleep 1\n\
-             kill -KILL \"$TUN_PID\" 2>/dev/null || true\n\
+             REASON=\"sigfile\"\n\
+             break\n\
+           fi\n\
+           if ! kill -0 \"$PARENT_PID\" 2>/dev/null; then\n\
+             REASON=\"parent_died\"\n\
              break\n\
            fi\n\
            sleep 0.3\n\
          done\n\
+         echo \"shutdown trigger: ${{REASON:-tun2socks_exited}}\" >> \"$LOG\"\n\
+         if [ -n \"$REASON\" ]; then\n\
+           kill -TERM \"$TUN_PID\" 2>/dev/null || true\n\
+           sleep 1\n\
+           kill -KILL \"$TUN_PID\" 2>/dev/null || true\n\
+         fi\n\
          \n\
          wait \"$TUN_PID\" 2>/dev/null\n\
          echo \"tun2socks exited with status $?\" >> \"$LOG\"\n\
@@ -736,6 +758,7 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
         iface = p.iface,
         socks = p.socks_addr,
         bypass = bypass_list,
+        parent_pid = p.parent_pid,
     )
 }
 

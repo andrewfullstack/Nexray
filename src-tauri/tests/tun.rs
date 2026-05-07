@@ -277,6 +277,7 @@ fn launcher_script_pidfile_and_sigfile_lifecycle() {
         socks_addr: "127.0.0.1:10808",
         bypass_ips: &[],
         iface_file: &iface_file_path,
+        parent_pid: std::process::id(),
     });
     std::fs::write(&script_path, script).expect("write script");
     Command::new("chmod")
@@ -335,6 +336,99 @@ fn launcher_script_pidfile_and_sigfile_lifecycle() {
         .map(|s| s.success())
         .unwrap_or(false);
     assert!(!still_alive, "stub process leaked");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Parent-death watchdog: when the host (nexray) process dies without
+/// touching the sigfile (Ctrl+C, SIGKILL, panic), the launcher must still
+/// detect that and tear itself down. Simulates by spawning a "fake parent"
+/// shell, telling the launcher to watch IT, then killing the fake parent.
+/// Without this fix the user would lose internet on every Ctrl+C of the
+/// dev server.
+#[cfg(target_os = "macos")]
+#[test]
+fn launcher_tears_down_when_parent_dies() {
+    use nexray::tun::{LauncherPaths, build_launcher_script};
+    use std::process::Command;
+
+    let dir = std::env::temp_dir().join(format!(
+        "nexray-tun-pdeath-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&dir).expect("mktemp dir");
+    let script_path = dir.join("launcher.sh");
+    let log_path = dir.join("tun.log");
+    let pidfile_path = dir.join("tun.pid");
+    let sigfile_path = dir.join("tun.sig");
+    let iface_file_path = dir.join("tun.iface");
+
+    // Spawn a fake parent — `sleep 60` — that we can kill mid-test.
+    let mut fake_parent = Command::new("/bin/sleep")
+        .arg("60")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn fake parent");
+    let fake_parent_pid = fake_parent.id();
+
+    let script = build_launcher_script(LauncherPaths {
+        log: &log_path,
+        pidfile: &pidfile_path,
+        sigfile: &sigfile_path,
+        binary: stub_path(),
+        iface: "nexray-tun-test",
+        socks_addr: "127.0.0.1:10808",
+        bypass_ips: &[],
+        iface_file: &iface_file_path,
+        parent_pid: fake_parent_pid,
+    });
+    std::fs::write(&script_path, script).expect("write script");
+    Command::new("chmod")
+        .args(["+x"])
+        .arg(&script_path)
+        .status()
+        .expect("chmod");
+
+    let mut launcher = Command::new("/bin/bash")
+        .arg(&script_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn launcher");
+
+    // Wait until launcher has the stub running and has written the pidfile.
+    assert!(
+        wait_until(Duration::from_secs(3), || pidfile_path.exists()),
+        "pidfile never appeared"
+    );
+
+    // Kill the fake parent. Launcher should notice within ~300ms via
+    // `kill -0 $PARENT_PID` and tear down without us ever touching the
+    // sigfile.
+    let _ = fake_parent.kill();
+    let _ = fake_parent.wait();
+
+    assert!(
+        wait_until(Duration::from_secs(3), || !pidfile_path.exists()),
+        "launcher didn't clean up pidfile after parent died"
+    );
+
+    // Launcher itself should exit shortly after.
+    let _ = wait_until(Duration::from_secs(3), || {
+        launcher.try_wait().ok().flatten().is_some()
+    });
+    let _ = launcher.kill();
+    let _ = launcher.wait();
+
+    // Confirm the log mentions the parent_died trigger so we know it was
+    // the watchdog that fired, not the sigfile branch we never touched.
+    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.contains("parent_died"),
+        "expected 'parent_died' shutdown trigger in log, got:\n{log}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
