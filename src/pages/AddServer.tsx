@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { decodeShadowrocketJson } from "../lib/import-json";
 import { decodeShareLink } from "../lib/share-link";
 import {
@@ -53,10 +53,20 @@ const initial: FormState = {
 
 export function AddServer() {
   const navigate = useNavigate();
-  const persisted = useProfileStore((s) => s.profile);
-  const setProfile = useProfileStore((s) => s.set);
+  const params = useParams<{ id?: string }>();
+  const editId = params.id ?? null;
+  const manualProfiles = useProfileStore((s) => s.manualProfiles);
+  const saveProfile = useProfileStore((s) => s.save);
 
-  const [form, setForm] = useState<FormState>(initial);
+  // Edit mode: prefill from the matching manual profile. Add mode: blank form.
+  const editTarget = useMemo(
+    () => (editId ? manualProfiles.find((p) => p.id === editId) ?? null : null),
+    [editId, manualProfiles],
+  );
+
+  const [form, setForm] = useState<FormState>(
+    editTarget ? profileToForm(editTarget) : initial,
+  );
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [jsonText, setJsonText] = useState("");
@@ -64,25 +74,27 @@ export function AddServer() {
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
 
-  // Pre-fill the form from the active profile so editing-an-existing flows
-  // through the same page.
+  // Re-prefill if the edit target appears later (e.g. profiles hydrate
+  // after first render) or the route id changes.
   useEffect(() => {
-    if (persisted) {
-      setForm(profileToForm(persisted));
+    if (editTarget) {
+      setForm(profileToForm(editTarget));
+    } else {
+      setForm(initial);
     }
-  }, [persisted]);
+  }, [editTarget]);
 
-  const profile = useMemo(() => buildProfile(form), [form]);
+  const profile = useMemo(() => buildProfile(form, editTarget?.id), [form, editTarget]);
   const valid = profile !== null;
 
   const handleSave = async () => {
     if (!profile) return;
     setError(null);
     try {
-      await setProfile(profile);
+      await saveProfile(profile);
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
-      navigate("/");
+      navigate("/servers");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -424,9 +436,13 @@ function KindToggle({ value, onChange }: { value: Kind; onChange: (v: Kind) => v
 // Form ↔ Profile bridge
 // ----------------------------------------------------------------------------
 
-function buildProfile(f: FormState): Profile | null {
+function buildProfile(f: FormState, preserveId: string | undefined): Profile | null {
   const port = Number(f.port);
   if (!Number.isFinite(port)) return null;
+
+  // In edit mode keep the original id even when fields change — otherwise
+  // changing the address would create a new entry and orphan the old one.
+  const id = preserveId ?? profileId(f.kind, f.address, port, f.uuid);
 
   if (f.kind === "cdn-ws") {
     const alpn = [
@@ -436,7 +452,7 @@ function buildProfile(f: FormState): Profile | null {
     if (alpn.length === 0) return null;
     const candidate = {
       kind: "cdn-ws" as const,
-      id: profileId(f.kind, f.address, port, f.uuid),
+      id,
       name: f.remarks.trim() || `${f.address}:${port || ""}`,
       ...(f.remarks.trim() ? { remark: f.remarks.trim() } : {}),
       address: f.address.trim(),
@@ -453,7 +469,7 @@ function buildProfile(f: FormState): Profile | null {
 
   const candidate = {
     kind: "reality" as const,
-    id: profileId(f.kind, f.address, port, f.uuid),
+    id,
     name: f.remarks.trim() || `${f.address}:${port || ""}`,
     ...(f.remarks.trim() ? { remark: f.remarks.trim() } : {}),
     address: f.address.trim(),

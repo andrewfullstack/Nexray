@@ -4,7 +4,8 @@ import {
   AppInfoSchema,
   AppSettingsSchema,
   ConnectionStatusSchema,
-  PoolEntrySchema,
+  EgressCheckSchema,
+  ProbeResultSchema,
   RoutingSettingsSchema,
   SubscriptionSchema,
   SystemProxyStatusSchema,
@@ -16,7 +17,8 @@ import {
   type AppSettings,
   type ConnectionStatus,
   type ConnectRequest,
-  type PoolEntry,
+  type EgressCheck,
+  type ProbeResult,
   type RoutingSettings,
   type Subscription,
   type SystemProxyStatus,
@@ -24,6 +26,7 @@ import {
   type TunCapabilities,
   type TunStatus,
 } from "./ipc";
+import type { Profile } from "./profile";
 import { z } from "zod";
 
 /**
@@ -59,6 +62,11 @@ export const tauri = {
     return TrafficStatsSchema.parse(raw);
   },
 
+  async egressCheck(): Promise<EgressCheck> {
+    const raw = await rawInvoke<unknown>("egress_check");
+    return EgressCheckSchema.parse(raw);
+  },
+
   // ---- Subscriptions / pool ------------------------------------------------
 
   async subscriptionsList(): Promise<Subscription[]> {
@@ -80,14 +88,9 @@ export const tauri = {
     return SubscriptionSchema.parse(raw);
   },
 
-  async poolList(): Promise<PoolEntry[]> {
-    const raw = await rawInvoke<unknown>("pool_list");
-    return z.array(PoolEntrySchema).parse(raw);
-  },
-
-  async poolProbeAll(): Promise<PoolEntry[]> {
-    const raw = await rawInvoke<unknown>("pool_probe_all");
-    return z.array(PoolEntrySchema).parse(raw);
+  async probeProfiles(profiles: Profile[]): Promise<ProbeResult[]> {
+    const raw = await rawInvoke<unknown>("probe_profiles", { profiles });
+    return z.array(ProbeResultSchema).parse(raw);
   },
 
   // ---- Routing -------------------------------------------------------------

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { decodeShadowrocketJson } from "../src/lib/import-json";
 
 const SAMPLE_VLESS_WS_TLS = `{
-  "host" : "3180e8f7.mykv-evj.pages.dev",
-  "obfsParam" : "3180e8f7.mykv-evj.pages.dev",
+  "host" : "example-edge.example.com",
+  "obfsParam" : "example-edge.example.com",
   "alpn" : "",
   "cert" : "",
   "created" : 1778097692.9895759,
@@ -34,11 +34,11 @@ const SAMPLE_VLESS_WS_TLS = `{
   "obfs" : "websocket",
   "dns" : "",
   "publicKey" : "",
-  "peer" : "3180e8f7.mykv-evj.pages.dev",
+  "peer" : "example-edge.example.com",
   "weight" : 1778097692,
   "title" : "",
   "proto" : "",
-  "password" : "77e24b83-495a-42e6-8eb8-c4cffa8b13b6",
+  "password" : "00000000-0000-0000-0000-000000000000",
   "shortId" : "",
   "chain" : "",
   "ip" : ""
@@ -52,14 +52,14 @@ describe("decodeShadowrocketJson", () => {
     expect(r.profile.kind).toBe("cdn-ws");
     if (r.profile.kind !== "cdn-ws") return;
 
-    expect(r.profile.address).toBe("3180e8f7.mykv-evj.pages.dev");
+    expect(r.profile.address).toBe("example-edge.example.com");
     expect(r.profile.port).toBe(443);
     // VLESS user UUID lives in `password`. Lowercased.
-    expect(r.profile.uuid).toBe("77e24b83-495a-42e6-8eb8-c4cffa8b13b6");
+    expect(r.profile.uuid).toBe("00000000-0000-0000-0000-000000000000");
     // WS Host header from obfsParam (or peer fallback).
-    expect(r.profile.host).toBe("3180e8f7.mykv-evj.pages.dev");
+    expect(r.profile.host).toBe("example-edge.example.com");
     expect(r.profile.path).toBe("/");
-    expect(r.profile.sni).toBe("3180e8f7.mykv-evj.pages.dev");
+    expect(r.profile.sni).toBe("example-edge.example.com");
     // alpn empty in input → defaults to both.
     expect(r.profile.alpn).toEqual(["h2", "http/1.1"]);
     expect(r.profile.fingerprint).toBe("chrome");
@@ -81,7 +81,7 @@ describe("decodeShadowrocketJson", () => {
       type: "VLESS",
       host: "x.example",
       port: "443",
-      password: "77e24b83-495a-42e6-8eb8-c4cffa8b13b6",
+      password: "00000000-0000-0000-0000-000000000000",
       obfs: "websocket",
       tls: false,
       peer: "x.example",
@@ -115,7 +115,7 @@ describe("decodeShadowrocketJson", () => {
       type: "VLESS",
       host: "1.2.3.4",
       port: "443",
-      password: "77e24b83-495a-42e6-8eb8-c4cffa8b13b6",
+      password: "00000000-0000-0000-0000-000000000000",
       peer: "www.microsoft.com",
       publicKey: "zR9LQ8Z3J0xWlb5fK0p9X1m3T7v6yE2u8N4o0aB1cD0",
       shortId: "abcd1234",

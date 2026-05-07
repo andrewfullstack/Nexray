@@ -42,6 +42,31 @@ pub enum FetchError {
     InvalidUrl(String),
     #[error("HTTP error: {0}")]
     Http(String),
+    #[error("{0}")]
+    NotASubscription(String),
+}
+
+/// True when the response looks like an HTML / web page rather than a
+/// subscription body. Catches the most common "wrong URL / wrong token"
+/// case where the origin's default page (nginx welcome, framework 404,
+/// SPA shell) is returned with a 200 status. We sniff the content-type
+/// header first; some misconfigured servers send `text/plain` or no
+/// content-type at all, so we also peek at the first bytes of the body.
+fn looks_like_html(content_type: &str, body: &str) -> bool {
+    if content_type.contains("text/html")
+        || content_type.contains("application/xhtml")
+    {
+        return true;
+    }
+    let head = body.trim_start();
+    if head.is_empty() {
+        return false;
+    }
+    let head_lower = head[..head.len().min(64)].to_ascii_lowercase();
+    head_lower.starts_with("<!doctype")
+        || head_lower.starts_with("<html")
+        || head_lower.starts_with("<head")
+        || head_lower.starts_with("<?xml")
 }
 
 #[derive(Default)]
@@ -96,15 +121,33 @@ pub async fn fetch_and_classify(
         .build()
         .map_err(|e| FetchError::Http(e.to_string()))?;
 
-    let body = client
+    let resp = client
         .get(url)
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| FetchError::Http(e.to_string()))?
+        .map_err(|e| FetchError::Http(e.to_string()))?;
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let body = resp
         .text()
         .await
         .map_err(|e| FetchError::Http(e.to_string()))?;
+
+    // Sanity check: many "wrong URL / wrong token" cases land on the
+    // origin's default page (nginx welcome, JSON 404, etc.). Detect
+    // HTML so the user gets a useful error instead of "23 servers
+    // skipped: 23 unknown protocol" from each HTML line being run
+    // through the share-link parser.
+    if looks_like_html(&content_type, &body) {
+        return Err(FetchError::NotASubscription(
+            "endpoint returned HTML, not a subscription body — check the URL or token".into(),
+        ));
+    }
 
     let result = classify_subscription(&body);
     let summary = if result.skipped.is_empty() {
@@ -248,6 +291,34 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
     use super::*;
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+
+    #[test]
+    fn html_detector_catches_common_default_pages() {
+        // nginx default page (real-world repro from a misconfigured CDN
+        // proxy that returns the origin's nginx welcome at the
+        // subscription path).
+        let nginx = "<!DOCTYPE html>\n<html>\n<head><title>Welcome to nginx!</title>";
+        assert!(looks_like_html("text/html; charset=utf-8", nginx));
+        assert!(looks_like_html("", nginx));
+
+        // Lowercase + leading whitespace is still HTML.
+        assert!(looks_like_html("", "  \n\t<HTML>"));
+
+        // SPA / framework HTML.
+        assert!(looks_like_html("text/html", "<html><body>hello</body></html>"));
+
+        // Real subscription bodies must NOT match. Plain vless://, base64,
+        // and an empty body all pass through.
+        assert!(!looks_like_html(
+            "text/plain",
+            "vless://uuid@host:443?type=ws"
+        ));
+        assert!(!looks_like_html(
+            "application/octet-stream",
+            "dmxlc3M6Ly9hYWFhQGZvbzo0NDM/dHlwZT13cw=="
+        ));
+        assert!(!looks_like_html("", ""));
+    }
 
     #[test]
     fn id_is_stable() {

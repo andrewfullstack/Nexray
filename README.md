@@ -7,9 +7,19 @@ A minimal, modern VLESS proxy client. Two deployment profiles, nothing else.
 | `cdn-ws` | VLESS + WebSocket + TLS, fronted by a CDN | Free / anti-IP-block tier |
 | `reality` | VLESS + Vision flow + REALITY over raw TCP | Paid VPS; lowest latency |
 
-By design, Nexray refuses VMess, Shadowsocks, Trojan, and every other legacy
-or insecure-by-default combination. See [`DEVELOPMENT.md`](./DEVELOPMENT.md)
-for the full vision and non-goals.
+**These are the only two deployment profiles where the wire traffic is
+indistinguishable from legitimate browser-to-CDN traffic** — both to a
+passive observer and to an active prober. Every other proxy protocol
+listed below has a known fingerprinting attack, an active-probe oracle,
+or a cert-chain information leak. We refuse them at the parser, not at
+the connection — nothing legacy ever reaches xray-core.
+
+Rejected by design: **VMess, Shadowsocks (SS / SSR), Trojan, Trojan-Go,
+plain VLESS+TLS direct, REALITY+WebSocket/gRPC/XHTTP/HTTPUpgrade, mKCP,
+raw QUIC inbound, and HTTP/SOCKS as outbound transports**. The
+per-protocol rationale (with attack references) lives in
+[`docs/PROFILES.md` _§ Why only these two_](./docs/PROFILES.md#why-only-these-two)
+and the threat model in [`docs/SECURITY.md`](./docs/SECURITY.md).
 
 ## Status
 
@@ -77,8 +87,9 @@ and per-rule enforcement):
 - xray-core, tun2socks, geoip.dat, and geosite.dat are SHA-256 pinned in
   `scripts/fetch-core.mjs`. Fetching refuses to run if hashes drift, and the
   binaries are never auto-upgraded across releases.
-- No telemetry. The Settings page exposes a telemetry toggle that currently
-  does nothing — kept visible so a future opt-in is auditable.
+- No telemetry. The Settings page has no opt-in switch — there is nothing
+  to opt into. Per DEVELOPMENT.md §12 rule 5, any future telemetry would
+  require an explicit, audited opt-in landing in a separate release.
 
 ## Project layout
 

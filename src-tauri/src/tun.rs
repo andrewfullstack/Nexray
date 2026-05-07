@@ -212,8 +212,10 @@ impl TunSupervisor {
                         // around if the prompt was still up.
                         let _ = child.kill();
                         let _ = child.wait();
-                        // Surface the launcher log if it exists — that's
-                        // where tun2socks's FATAL lines went.
+                        // Read the launcher log (where tun2socks's FATAL
+                        // lines go) so we can log the diagnostic detail
+                        // even though we surface a friendlier message
+                        // to the UI.
                         let log_excerpt = std::fs::read_to_string(&log_path)
                             .ok()
                             .map(|s| {
@@ -227,7 +229,18 @@ impl TunSupervisor {
                                     .join(" | ")
                             })
                             .unwrap_or_else(|| "no log file".into());
-                        let msg = format!("{why}; launcher log tail: {log_excerpt}");
+                        // Diagnostic detail goes to tracing for debug
+                        // builds / log files; the user-facing message in
+                        // `last_error` is the short-form below. The most
+                        // common path here is the user dismissing the
+                        // sudo prompt (osascript exits with status 1 when
+                        // auth is cancelled), so phrase the UI message
+                        // around that.
+                        tracing::warn!(
+                            target: "tun",
+                            "osascript bring-up failed: {why}; log tail: {log_excerpt}",
+                        );
+                        let msg = "TUN Start failed without auth".to_string();
                         inner.state = TunState::Failed;
                         inner.last_error = Some(msg.clone());
                         return Err(TunError::Spawn(std::io::Error::other(msg)));
@@ -523,8 +536,16 @@ fn spawn_via_osascript(
         "/bin/bash {script}",
         script = shell_single_quote(&script_path.to_string_lossy())
     );
+    // `with prompt "..."` controls the message body of the macOS auth
+    // dialog. The dialog *title* — currently "osascript" — is set by
+    // macOS from the calling binary's bundle identity and we can only
+    // change that with a code-signed privileged helper (SMJobBless) or
+    // by wrapping the spawn in our own .app bundle with an Info.plist.
+    // Both are out of scope for an unsigned dev build, but the prompt
+    // line at least lets the user see "Nexray TUN" before they type
+    // their password.
     let applescript = format!(
-        "do shell script \"{cmd}\" with administrator privileges",
+        "do shell script \"{cmd}\" with prompt \"Nexray TUN\" with administrator privileges",
         cmd = applescript_double_quote(&inner_cmd)
     );
 

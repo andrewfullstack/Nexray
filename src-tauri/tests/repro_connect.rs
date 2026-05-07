@@ -14,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use nexray_core::xray_config::{default_routing_settings, materialize, XrayConfigOptions};
-use nexray_core::{rules_conf, Alpn, CdnWsProfile, Fingerprint, Profile};
+use nexray_core::{decode_share_link, rules_conf, DecodeResult, Profile};
 
 const REAL_XRAY: &str =
     "/Users/yangqi/Documents/github/nexray/src-tauri/binaries/Xray-macos-arm64-v8a/xray";
@@ -27,21 +27,23 @@ fn pick_loopback_port() -> u16 {
     port
 }
 
+/// This live test connects to a real CDN-WS proxy server. The VLESS
+/// UUID gates the upstream and isn't shipped in source — set
+/// `NEXRAY_TEST_VLESS_URL` to your own `vless://` share link before
+/// running with `--ignored`.
 fn fixture_profile() -> Profile {
-    // Same shape as the user's saved JSON-imported server.
-    Profile::CdnWs(CdnWsProfile {
-        id: "repro".into(),
-        name: "repro".into(),
-        remark: None,
-        address: "3180e8f7.mykv-evj.pages.dev".into(),
-        port: 443,
-        uuid: "77e24b83-495a-42e6-8eb8-c4cffa8b13b6".into(),
-        host: "3180e8f7.mykv-evj.pages.dev".into(),
-        path: "/".into(),
-        sni: "3180e8f7.mykv-evj.pages.dev".into(),
-        alpn: vec![Alpn::H2, Alpn::Http11],
-        fingerprint: Fingerprint::Chrome,
-    })
+    let url = std::env::var("NEXRAY_TEST_VLESS_URL").unwrap_or_else(|_| {
+        panic!(
+            "set NEXRAY_TEST_VLESS_URL to your own VLESS+WS+TLS share link \
+             (vless://uuid@host:443?type=ws&...) before running this test"
+        )
+    });
+    match decode_share_link(&url) {
+        DecodeResult::Ok { profile } => profile,
+        DecodeResult::Err { reason, .. } => {
+            panic!("NEXRAY_TEST_VLESS_URL did not parse: {reason:?}")
+        }
+    }
 }
 
 fn build_config_json() -> (String, usize, usize) {

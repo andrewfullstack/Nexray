@@ -201,7 +201,6 @@ const IPC_STRUCTS = {
   AppSettings: {
     fields: [
       ["autoUpdateOptIn", "bool"],
-      ["telemetryOptIn", "bool"],
     ],
   },
   SetSettingsRequest: {

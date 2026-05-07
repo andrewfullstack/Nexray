@@ -14,12 +14,12 @@ const PRESETS: { id: RoutingPreset; label: string; help: string }[] = [
   {
     id: "direct",
     label: "Direct",
-    help: "Apply the rules file first, then everything else direct (proxy disabled). Ads still blocked.",
+    help: "Kill-switch: everything direct. Block rules in the rules file still fire (ad filtering); direct/proxy rules in the file are ignored.",
   },
   {
     id: "global",
     label: "Global proxy",
-    help: "Apply the rules file first, then everything else through the proxy. No CN exemption.",
+    help: "Kill-switch: everything through the proxy, including .cn domains. Block rules in the rules file still fire; direct/proxy rules in the file are ignored.",
   },
 ];
 
@@ -38,12 +38,30 @@ const MATCHER_TYPES: RuleMatcherType[] = [
 ];
 
 export function Routing() {
-  const { settings, loading, dirty, error, hydrate, setPreset, setDns, reset, save } =
-    useRoutingStore();
+  const {
+    settings,
+    loading,
+    dirty,
+    error,
+    presetFlashAt,
+    hydrate,
+    applyPreset,
+    setDns,
+    reset,
+    save,
+  } = useRoutingStore();
   const rulesLoading = useRulesFileStore((s) => s.loading);
   const rulesHydrate = useRulesFileStore((s) => s.hydrate);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [presetFlashVisible, setPresetFlashVisible] = useState(false);
+
+  useEffect(() => {
+    if (presetFlashAt === null) return;
+    setPresetFlashVisible(true);
+    const t = window.setTimeout(() => setPresetFlashVisible(false), 1500);
+    return () => window.clearTimeout(t);
+  }, [presetFlashAt]);
 
   useEffect(() => {
     void hydrate();
@@ -71,37 +89,47 @@ export function Routing() {
         </h2>
 
         <div className="field">
-          <span className="label">Fallback preset</span>
+          <div
+            className="row"
+            style={{ justifyContent: "space-between", alignItems: "baseline" }}
+          >
+            <span className="label">Fallback preset</span>
+            {presetFlashVisible && <span className="flash ok">Applied.</span>}
+          </div>
           <p className="dim" style={{ margin: "0 0 0.5rem" }}>
             <small>
-              The fallback preset runs <em>after</em> all rules in
-              <code> rules.conf</code>. Xray uses first-match-wins, so rules
-              in the file take priority; the preset catches whatever those
-              rules don&apos;t match.
+              Click a preset to apply it immediately — if a profile is
+              connected, xray reloads in place. The fallback preset runs{" "}
+              <em>after</em> all rules in <code>rules.conf</code>; Xray uses
+              first-match-wins, so rules in the file take priority and the
+              preset catches whatever they don&apos;t match.
             </small>
           </p>
-          {PRESETS.map((p) => (
-            <label
-              key={p.id}
-              style={{
-                display: "block",
-                padding: "0.5rem 0",
-                borderTop: "1px solid var(--border)",
-              }}
-            >
-              <input
-                type="radio"
-                name="preset"
-                checked={settings.preset === p.id}
-                onChange={() => setPreset(p.id)}
-                style={{ marginRight: "0.5rem" }}
-              />
-              <strong>{p.label}</strong>
-              <p className="dim" style={{ margin: "0.2rem 0 0 1.5rem" }}>
-                <small>{p.help}</small>
-              </p>
-            </label>
-          ))}
+          <div className="preset-grid">
+            {PRESETS.map((p) => {
+              const selected = settings.preset === p.id;
+              return (
+                <label
+                  key={p.id}
+                  className={`preset-card${selected ? " selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="preset"
+                    checked={selected}
+                    onChange={() => {
+                      void applyPreset(p.id);
+                    }}
+                    className="sr-only"
+                  />
+                  <strong>{p.label}</strong>
+                  <span className="dim">
+                    <small>{p.help}</small>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -160,7 +188,7 @@ export function Routing() {
             onClick={() => void handleSavePresetAndDns()}
             disabled={!dirty}
           >
-            Save preset + DNS
+            Save DNS
           </button>
         </div>
       </div>
@@ -360,13 +388,24 @@ function RulesTable({
         className="mono"
         style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.92em" }}
       >
-        <thead style={{ position: "sticky", top: 0, background: "var(--bg-2)" }}>
+        <thead
+          style={{
+            position: "sticky",
+            top: 0,
+            // Solid opaque fill so rules scrolling underneath don't bleed
+            // through. The card body is translucent (frosted glass), but
+            // the sticky header needs to actually occlude.
+            background: "rgb(28, 34, 42)",
+            zIndex: 1,
+            boxShadow: "0 1px 0 var(--border)",
+          }}
+        >
           <tr style={{ textAlign: "left" }}>
-            <th style={{ padding: "0.4rem" }}>on</th>
-            <th style={{ padding: "0.4rem" }}>type</th>
-            <th style={{ padding: "0.4rem" }}>matcher</th>
-            <th style={{ padding: "0.4rem" }}>→</th>
-            <th style={{ padding: "0.4rem" }}></th>
+            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>on</th>
+            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>type</th>
+            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>matcher</th>
+            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>→</th>
+            <th style={{ padding: "0.5rem 0.4rem" }}></th>
           </tr>
         </thead>
         <tbody>

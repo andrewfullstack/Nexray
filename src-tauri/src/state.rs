@@ -22,6 +22,11 @@ pub struct AppState {
     /// always go through `subscriptions` (paste-link is direct), so we
     /// can't recover this from there.
     pub active_profile: Mutex<Option<Profile>>,
+    /// Loopback port the running xray's stats inbound is bound to. Picked
+    /// fresh in `connect` (and again on every routing/rules-file
+    /// hot-reload), cleared on disconnect. The `traffic_stats` IPC reads
+    /// this to shell out to `xray api statsquery`.
+    pub stats_port: Mutex<Option<u16>>,
     /// Active subscriptions keyed by `Subscription::id`. Persisted via
     /// `tauri-plugin-store` under `subscriptions.json`.
     pub subscriptions: Mutex<HashMap<String, Subscription>>,
@@ -32,7 +37,7 @@ pub struct AppState {
     pub routing: Mutex<RoutingSettings>,
     /// TUN supervisor — lazily constructed when the user first enables TUN.
     pub tun: Mutex<Option<crate::tun::TunSupervisor>>,
-    /// App-wide settings (auto-update opt-in, telemetry opt-in). Persisted via
+    /// App-wide settings (auto-update opt-in). Persisted via
     /// `tauri-plugin-store` under `settings.json`.
     pub settings: Mutex<AppSettings>,
     /// macOS / Windows / Linux system-proxy supervisor. Process-lifetime
@@ -45,13 +50,13 @@ impl Default for AppState {
         Self {
             sidecar: Mutex::new(None),
             active_profile: Mutex::new(None),
+            stats_port: Mutex::new(None),
             subscriptions: Mutex::new(HashMap::new()),
             probes: Mutex::new(HashMap::new()),
             routing: Mutex::new(default_routing_settings()),
             tun: Mutex::new(None),
             settings: Mutex::new(AppSettings {
                 auto_update_opt_in: false,
-                telemetry_opt_in: false,
             }),
             system_proxy: crate::proxy::ProxySupervisor::default(),
         }

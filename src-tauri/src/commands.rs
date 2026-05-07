@@ -9,7 +9,7 @@ use nexray_core::rules_conf;
 use nexray_core::xray_config::{materialize, XrayConfigOptions};
 use nexray_core::{
     AddSubscriptionRequest, AppInfo, AppSettings, ConnectRequest, ConnectionState,
-    ConnectionStatus, PoolEntry, Profile, RoutingSettings, SetRoutingRequest, SetSettingsRequest,
+    ConnectionStatus, Profile, RoutingSettings, SetRoutingRequest, SetSettingsRequest,
     Subscription, SubscriptionIdRequest, SystemProxyStatus, TrafficStats, TunCapabilities,
     TunState, TunStatus,
 };
@@ -19,7 +19,7 @@ use crate::core::XraySidecar;
 use crate::state::AppState;
 use crate::stats::StatsClient;
 use crate::subscription::{
-    self as sub_mod, build_pool, fetch_and_classify, pending, probe_all, validate_add, ProbeRecord,
+    self as sub_mod, fetch_and_classify, pending, probe_all, validate_add, ProbeRecord,
 };
 use crate::tun::TunSupervisor;
 
@@ -75,18 +75,61 @@ pub async fn connect(
         .start(profile_id, socks_port, config_json)
         .map_err(|e| e.to_string())?;
     *state.active_profile.lock().map_err(|e| e.to_string())? = Some(req.profile);
+    *state.stats_port.lock().map_err(|e| e.to_string())? = Some(stats_port);
     Ok(sidecar.status())
 }
 
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<ConnectionStatus, String> {
+    // Tear-down order matters: TUN's tun2socks and the OS system-proxy both
+    // forward to xray's SOCKS inbound. Stopping xray first would leave them
+    // forwarding into a dead listener, blackholing all traffic until the
+    // user notices. Stop the consumers first, then the producer.
+    //
+    // Each step is best-effort — a failure on one side must not block the
+    // others, otherwise a stuck TUN tear-down would leave xray running.
+    teardown_tun_best_effort(&state);
+    teardown_system_proxy_best_effort(&state);
+
     let guard = state.sidecar.lock().map_err(|e| e.to_string())?;
     if let Some(sidecar) = guard.as_ref() {
         sidecar.stop().map_err(|e| e.to_string())?;
         *state.active_profile.lock().map_err(|e| e.to_string())? = None;
+        *state.stats_port.lock().map_err(|e| e.to_string())? = None;
         return Ok(sidecar.status());
     }
+    *state.active_profile.lock().map_err(|e| e.to_string())? = None;
+    *state.stats_port.lock().map_err(|e| e.to_string())? = None;
     Ok(disconnected())
+}
+
+fn teardown_tun_best_effort(state: &State<'_, AppState>) {
+    let supervisor = match state.tun.lock() {
+        Ok(g) => g.as_ref().cloned(),
+        Err(e) => {
+            tracing::warn!(target: "disconnect", "tun lock poisoned: {e}");
+            return;
+        }
+    };
+    let Some(supervisor) = supervisor else { return };
+    if !matches!(
+        supervisor.status().state,
+        TunState::Starting | TunState::Active
+    ) {
+        return;
+    }
+    if let Err(e) = supervisor.disable() {
+        tracing::warn!(target: "disconnect", "tun disable failed: {e}");
+    }
+}
+
+fn teardown_system_proxy_best_effort(state: &State<'_, AppState>) {
+    if !state.system_proxy.status().enabled {
+        return;
+    }
+    if let Err(e) = state.system_proxy.disable() {
+        tracing::warn!(target: "disconnect", "system proxy disable failed: {e}");
+    }
 }
 
 #[tauri::command]
@@ -100,21 +143,125 @@ pub async fn status(state: State<'_, AppState>) -> Result<ConnectionStatus, Stri
 
 #[tauri::command]
 pub async fn traffic_stats(state: State<'_, AppState>) -> Result<TrafficStats, String> {
-    let guard = state.sidecar.lock().map_err(|e| e.to_string())?;
-    let Some(sidecar) = guard.as_ref() else {
-        return Ok(StatsClient::unavailable());
+    // Snapshot what we need without holding any locks across the await:
+    // (binary path, stats port). If anything is missing we just return
+    // the unavailable sentinel — polling at 1Hz must never throw.
+    let (xray_bin, stats_port) = {
+        let sidecar_guard = state.sidecar.lock().map_err(|e| e.to_string())?;
+        let port_guard = state.stats_port.lock().map_err(|e| e.to_string())?;
+        let Some(sidecar) = sidecar_guard.as_ref() else {
+            return Ok(StatsClient::unavailable());
+        };
+        let s = sidecar.status();
+        if !matches!(s.state, ConnectionState::Connected | ConnectionState::Connecting) {
+            return Ok(StatsClient::unavailable());
+        }
+        let Some(port) = *port_guard else {
+            return Ok(StatsClient::unavailable());
+        };
+        (sidecar.binary_path(), port)
     };
-    let s = sidecar.status();
-    if !matches!(
-        s.state,
-        ConnectionState::Connected | ConnectionState::Connecting
-    ) {
-        return Ok(StatsClient::unavailable());
+    Ok(StatsClient::fetch(&xray_bin, stats_port).await)
+}
+
+/// Probe what the world sees as the egress IP when traffic is routed
+/// through the running xray's SOCKS inbound. Lets the user visually
+/// confirm a server switch even when both endpoints share a CDN front
+/// (e.g. two Cloudflare pages.dev workers — same `2a09:..` /16 but the
+/// actual /48 differs). Returns `None`-shaped sentinel when not
+/// connected so the UI can disable the panel cleanly.
+#[tauri::command]
+pub async fn egress_check(
+    state: State<'_, AppState>,
+) -> Result<EgressCheckResponse, String> {
+    let socks_port = {
+        let guard = state.sidecar.lock().map_err(|e| e.to_string())?;
+        let Some(sidecar) = guard.as_ref() else {
+            return Ok(EgressCheckResponse::not_connected());
+        };
+        let s = sidecar.status();
+        if !matches!(s.state, ConnectionState::Connected) {
+            return Ok(EgressCheckResponse::not_connected());
+        }
+        let Some(port) = s.socks_port else {
+            return Ok(EgressCheckResponse::not_connected());
+        };
+        port
+    };
+
+    let started = std::time::Instant::now();
+    // socks5h:// makes reqwest hand the hostname to xray for resolution.
+    // Important: do NOT call `.no_proxy()` after `.proxy(...)` — that
+    // method clears ALL proxies including the one we just set, which
+    // sends the request out the default route and reports the user's
+    // home IP instead of the proxy egress.
+    let proxy = match reqwest::Proxy::all(format!("socks5h://127.0.0.1:{socks_port}")) {
+        Ok(p) => p,
+        Err(e) => return Ok(EgressCheckResponse::error(format!("proxy: {e}"))),
+    };
+    let client = match reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return Ok(EgressCheckResponse::error(format!("client: {e}"))),
+    };
+
+    // ifconfig.me/ip is plain text, no JSON parsing needed. Falls back
+    // through to error if the endpoint is unreachable (proxy server
+    // dropped the connection, DNS rejected, etc).
+    let result = client.get("https://ifconfig.me/ip").send().await;
+    let resp = match result {
+        Ok(r) => r,
+        Err(e) => return Ok(EgressCheckResponse::error(format!("request: {e}"))),
+    };
+    if !resp.status().is_success() {
+        return Ok(EgressCheckResponse::error(format!(
+            "HTTP {}",
+            resp.status()
+        )));
     }
-    // Stats API binding port is currently not surfaced through ConnectionStatus
-    // (it's an internal detail). Phase 2 ships a stub; Phase 2.5 will plumb
-    // the port through and run the real `xray api statsquery` shell-out.
-    Ok(StatsClient::unavailable())
+    let body = match resp.text().await {
+        Ok(b) => b,
+        Err(e) => return Ok(EgressCheckResponse::error(format!("body: {e}"))),
+    };
+    let ip = body.trim().to_string();
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    Ok(EgressCheckResponse {
+        ok: true,
+        ip: Some(ip),
+        elapsed_ms: Some(elapsed_ms),
+        error: None,
+    })
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EgressCheckResponse {
+    pub ok: bool,
+    pub ip: Option<String>,
+    pub elapsed_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
+impl EgressCheckResponse {
+    fn not_connected() -> Self {
+        Self {
+            ok: false,
+            ip: None,
+            elapsed_ms: None,
+            error: Some("not connected".into()),
+        }
+    }
+    fn error(msg: String) -> Self {
+        Self {
+            ok: false,
+            ip: None,
+            elapsed_ms: None,
+            error: Some(msg),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -372,43 +519,29 @@ pub async fn subscription_refresh(
     Ok(updated)
 }
 
+/// TCP-connect probe a list of profiles in parallel and return the
+/// resulting per-profile latency in ms (None on timeout / DNS failure).
+/// Used by the Servers page so the user can sort manual servers by
+/// reachability without leaving that view. Results are also cached in
+/// `state.probes` keyed by profile id; the Servers UI re-uses the
+/// freshest cached value across renders without re-probing.
 #[tauri::command]
-pub async fn pool_list(state: State<'_, AppState>) -> Result<Vec<PoolEntry>, String> {
-    let subs = state
-        .subscriptions
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone();
-    let probes = state.probes.lock().map_err(|e| e.to_string())?;
-    let mut probes_map = std::collections::HashMap::new();
-    for (k, v) in probes.iter() {
-        probes_map.insert(
-            k.clone(),
-            ProbeRecord {
-                latency_ms: v.latency_ms,
-                last_probe_ms: v.last_probe_ms,
-            },
-        );
-    }
-    drop(probes);
-    Ok(build_pool(&subs, &probes_map))
-}
-
-#[tauri::command]
-pub async fn pool_probe_all(state: State<'_, AppState>) -> Result<Vec<PoolEntry>, String> {
-    // Snapshot profiles to probe (drop the lock before await).
-    let profiles: Vec<Profile> = {
-        let guard = state.subscriptions.lock().map_err(|e| e.to_string())?;
-        guard
-            .values()
-            .flat_map(|s| s.profiles.iter().cloned())
-            .collect()
-    };
+pub async fn probe_profiles(
+    profiles: Vec<Profile>,
+    state: State<'_, AppState>,
+) -> Result<Vec<ProbeResult>, String> {
     let results = probe_all(&profiles).await;
     let now_ms = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
+    let out: Vec<ProbeResult> = results
+        .iter()
+        .map(|(id, latency)| ProbeResult {
+            profile_id: id.clone(),
+            latency_ms: *latency,
+        })
+        .collect();
     {
         let mut probes = state.probes.lock().map_err(|e| e.to_string())?;
         for (id, latency) in results {
@@ -421,7 +554,14 @@ pub async fn pool_probe_all(state: State<'_, AppState>) -> Result<Vec<PoolEntry>
             );
         }
     }
-    pool_list(state).await
+    Ok(out)
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeResult {
+    pub profile_id: String,
+    pub latency_ms: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -692,7 +832,76 @@ pub async fn routing_set(
         *guard = req.settings.clone();
     }
     persist_routing(&app, &state)?;
+    // Apply immediately: if a profile is currently active, re-materialize
+    // the xray config with the new routing + restart the sidecar in place.
+    // Without this, switching presets only takes effect after the next
+    // manual Disconnect → Connect — the symptom the user hit.
+    reload_sidecar_with_current_routing(&state, &app)?;
     Ok(req.settings)
+}
+
+/// If a profile is connected, stop+start the xray sidecar with a fresh
+/// config that reflects the current `state.routing`. No-op when nothing
+/// is connected. Returns Ok(()) on success or no-op; surfaces the
+/// underlying error if either stop or start fails.
+fn reload_sidecar_with_current_routing(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+) -> Result<(), String> {
+    let active_profile = state
+        .active_profile
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+    let Some(profile) = active_profile else {
+        return Ok(());
+    };
+
+    let sidecar = {
+        let g = state.sidecar.lock().map_err(|e| e.to_string())?;
+        g.as_ref().cloned()
+    };
+    let Some(sidecar) = sidecar else {
+        return Ok(());
+    };
+
+    let status = sidecar.status();
+    if !matches!(
+        status.state,
+        ConnectionState::Connected | ConnectionState::Connecting
+    ) {
+        return Ok(());
+    }
+    let Some(socks_port) = status.socks_port else {
+        return Ok(());
+    };
+
+    let stats_port = pick_loopback_port();
+    let routing = state.routing.lock().map_err(|e| e.to_string())?.clone();
+    let extra_rules = rules_file_read_translated(app).unwrap_or_default();
+    let local_ip = detect_local_ip();
+
+    let config = materialize(
+        &profile,
+        &XrayConfigOptions {
+            socks_port,
+            stats_port: Some(stats_port),
+            log_level: "warning",
+            routing,
+            extra_rules,
+            direct_send_through: local_ip,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let config_json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+
+    let profile_id = profile_id(&profile).to_string();
+    sidecar.stop().map_err(|e| e.to_string())?;
+    sidecar
+        .start(profile_id, socks_port, config_json)
+        .map_err(|e| e.to_string())?;
+    *state.stats_port.lock().map_err(|e| e.to_string())? = Some(stats_port);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -716,7 +925,11 @@ pub async fn rules_file_get(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn rules_file_set(app: AppHandle, contents: String) -> Result<(), String> {
+pub async fn rules_file_set(
+    app: AppHandle,
+    contents: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     // Validate by parsing — we don't reject malformed content, but we do
     // reject empty input so an accidental clear doesn't blow away the user's
     // rules. Fully-empty content is replaced by the bundled default.
@@ -730,6 +943,7 @@ pub async fn rules_file_set(app: AppHandle, contents: String) -> Result<(), Stri
     let dir = path.parent().ok_or_else(|| "no parent dir".to_string())?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(&path, to_write).map_err(|e| e.to_string())?;
+    reload_sidecar_with_current_routing(&state, &app)?;
     Ok(())
 }
 
@@ -740,6 +954,7 @@ pub async fn rules_file_append(
     matcher: String,
     destination: String,
     no_resolve: bool,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     use nexray_core::rules_conf::{ParsedRule, RuleKind};
     let policy = match destination.to_lowercase().as_str() {
@@ -776,6 +991,7 @@ pub async fn rules_file_append(
     conf.append_rule(new_rule);
     let rendered = rules_conf::render(&conf);
     std::fs::write(&path, rendered).map_err(|e| e.to_string())?;
+    reload_sidecar_with_current_routing(&state, &app)?;
     Ok(())
 }
 
@@ -784,22 +1000,29 @@ pub async fn rules_file_set_enabled(
     app: AppHandle,
     rule_index: u32,
     enabled: bool,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = rules_conf_path(&app)?;
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut conf = rules_conf::parse(&text);
     conf.set_rule_enabled(rule_index as usize, enabled);
     std::fs::write(&path, rules_conf::render(&conf)).map_err(|e| e.to_string())?;
+    reload_sidecar_with_current_routing(&state, &app)?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn rules_file_delete(app: AppHandle, rule_index: u32) -> Result<(), String> {
+pub async fn rules_file_delete(
+    app: AppHandle,
+    rule_index: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let path = rules_conf_path(&app)?;
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut conf = rules_conf::parse(&text);
     conf.delete_rule(rule_index as usize);
     std::fs::write(&path, rules_conf::render(&conf)).map_err(|e| e.to_string())?;
+    reload_sidecar_with_current_routing(&state, &app)?;
     Ok(())
 }
 
@@ -808,6 +1031,7 @@ pub async fn rules_file_set_destination(
     app: AppHandle,
     rule_index: u32,
     destination: String,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let dest = match destination.to_lowercase().as_str() {
         "direct" => nexray_core::RoutingDestination::Direct,
@@ -820,15 +1044,20 @@ pub async fn rules_file_set_destination(
     let mut conf = rules_conf::parse(&text);
     conf.set_rule_destination(rule_index as usize, dest);
     std::fs::write(&path, rules_conf::render(&conf)).map_err(|e| e.to_string())?;
+    reload_sidecar_with_current_routing(&state, &app)?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn rules_file_reset(app: AppHandle) -> Result<(), String> {
+pub async fn rules_file_reset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let path = rules_conf_path(&app)?;
     let dir = path.parent().ok_or_else(|| "no parent dir".to_string())?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(&path, DEFAULT_RULES_CONF).map_err(|e| e.to_string())?;
+    reload_sidecar_with_current_routing(&state, &app)?;
     Ok(())
 }
 

@@ -54,6 +54,22 @@ export const TrafficStatsSchema = z
   .strict();
 export type TrafficStats = z.infer<typeof TrafficStatsSchema>;
 
+/**
+ * One-shot egress check. The Rust shell does an HTTPS GET to `ifconfig.me/ip`
+ * through the running xray's SOCKS inbound, returning whatever IP the
+ * destination saw — your visual confirmation that a server switch reached
+ * the wire even when both endpoints share a CDN front.
+ */
+export const EgressCheckSchema = z
+  .object({
+    ok: z.boolean(),
+    ip: z.string().nullable(),
+    elapsedMs: z.number().int().min(0).nullable(),
+    error: z.string().nullable(),
+  })
+  .strict();
+export type EgressCheck = z.infer<typeof EgressCheckSchema>;
+
 /** Input to the `connect` command. */
 export const ConnectRequestSchema = z
   .object({
@@ -90,19 +106,15 @@ export const SubscriptionSchema = z
   .strict();
 export type Subscription = z.infer<typeof SubscriptionSchema>;
 
-/** A flat row in the server-pool view across all subscriptions. */
-export const PoolEntrySchema = z
+/** Per-profile latency probe result returned by `probe_profiles`. */
+export const ProbeResultSchema = z
   .object({
-    subscriptionId: z.string().min(1),
-    subscriptionName: z.string().min(1),
-    profile: ProfileSchema,
-    /** Last measured TCP-connect latency to the server's address:port. */
+    profileId: z.string().min(1),
+    /** TCP-connect latency in ms; null on timeout / DNS failure. */
     latencyMs: z.number().int().min(0).nullable(),
-    /** When `latencyMs` was last sampled. */
-    lastProbeMs: z.number().int().min(0).nullable(),
   })
   .strict();
-export type PoolEntry = z.infer<typeof PoolEntrySchema>;
+export type ProbeResult = z.infer<typeof ProbeResultSchema>;
 
 export const AddSubscriptionRequestSchema = z
   .object({
@@ -269,17 +281,14 @@ export type SystemProxyStatus = z.infer<typeof SystemProxyStatusSchema>;
 // ----------------------------------------------------------------------------
 
 /**
- * App-wide settings persisted across launches. Both flags default to
- * `false`. Per DEVELOPMENT.md §12 rule 5 — telemetry is off by default and
- * is currently *not implemented* even when enabled; the toggle exists so
- * users can audit + revoke a future opt-in.
+ * App-wide settings persisted across launches. The shape uses default
+ * (non-strict) Zod parsing so any legacy fields written by older builds
+ * (e.g. the deleted `telemetryOptIn` toggle) are silently dropped on
+ * next read instead of raising a validation error.
  */
-export const AppSettingsSchema = z
-  .object({
-    autoUpdateOptIn: z.boolean(),
-    telemetryOptIn: z.boolean(),
-  })
-  .strict();
+export const AppSettingsSchema = z.object({
+  autoUpdateOptIn: z.boolean(),
+});
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
 export const SetSettingsRequestSchema = z
@@ -289,7 +298,6 @@ export type SetSettingsRequest = z.infer<typeof SetSettingsRequestSchema>;
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoUpdateOptIn: false,
-  telemetryOptIn: false,
 };
 
 // ----------------------------------------------------------------------------

@@ -99,13 +99,16 @@ fn translate_emits_xray_routing_rules() {
     let result = translate(&conf);
     // Disabled rule + IP-ASN are dropped (1 disabled, 1 unsupported).
     assert!(result.skipped.iter().any(|s| s.reason.contains("IP-ASN")));
+    // FINAL is intentionally skipped — nexray's routing preset is the true
+    // catch-all and an emitted `network: tcp,udp` rule would mask it.
+    assert!(result.skipped.iter().any(|s| s.reason.contains("FINAL")));
     let json = serde_json::to_string(&result.rules).expect("serialize");
     assert!(json.contains("\"domain:apple.com\""));
     assert!(json.contains("\"full:copilot.microsoft.com\""));
     assert!(json.contains("\"10.0.0.0/8\""));
     assert!(json.contains("\"geoip:cn\""));
-    // FINAL → catch-all network rule.
-    assert!(json.contains("\"network\":\"tcp,udp\""));
+    // FINAL → dropped, not emitted as a catch-all network rule.
+    assert!(!json.contains("\"network\":\"tcp,udp\""));
 }
 
 #[test]

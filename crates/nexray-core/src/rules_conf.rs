@@ -461,11 +461,18 @@ fn rule_to_xray(r: &ParsedRule) -> Result<Value, &'static str> {
             "ip": [format!("geoip:{}", v.to_lowercase())],
             "outboundTag": outbound,
         })),
-        RuleKind::Final => Ok(json!({
-            "type": "field",
-            "network": "tcp,udp",
-            "outboundTag": outbound,
-        })),
+        // FINAL is Shadowrocket's catch-all. In nexray the *routing preset*
+        // is the true fallback; emitting a `network: tcp,udp` rule here
+        // would land BEFORE the preset rules in xray's first-match-wins
+        // evaluation and silently mask the preset (e.g. `FINAL,PROXY`
+        // makes Global identical to Default — preset's ad-block never
+        // runs because every unmatched domain is already grabbed by
+        // FINAL). Drop it on translation; the UI surfaces the skip
+        // reason so users know rules.conf's FINAL is ignored.
+        RuleKind::Final => {
+            let _ = outbound;
+            Err("FINAL: replaced by the routing preset (preset is the catch-all)")
+        }
         RuleKind::IpAsn(_) => Err("IP-ASN: xray-core has no native ASN matcher"),
         RuleKind::UserAgent(_) => Err("USER-AGENT: xray-core has no native UA matcher"),
         RuleKind::Other { .. } => Err("rule type not supported by xray-core"),

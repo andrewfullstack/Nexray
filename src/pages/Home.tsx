@@ -1,17 +1,22 @@
+import { useEffect, useRef, useState } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { Link } from "react-router-dom";
+import { ArrowDown, ArrowUp, Power, RefreshCw } from "lucide-react";
 import { StatusPill } from "../components/StatusPill";
 import { SystemProxyToggle } from "../components/SystemProxyToggle";
-import { TrafficSparkline } from "../components/TrafficSparkline";
 import { TunToggle } from "../components/TunToggle";
 import { useConnectionStore } from "../stores/connection";
 import { useProfileStore } from "../stores/profile";
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatRate } from "../lib/format";
 import type { Profile } from "../lib/profile";
+import { tauri } from "../lib/tauri";
+import type { EgressCheck } from "../lib/ipc";
 
 export function Home() {
   const intl = useIntl();
   const profile = useProfileStore((s) => s.profile);
+  const manualProfiles = useProfileStore((s) => s.manualProfiles);
+  const setActiveById = useProfileStore((s) => s.setActiveById);
   const status = useConnectionStore((s) => s.status);
   const stats = useConnectionStore((s) => s.stats);
   const spark = useConnectionStore((s) => s.spark);
@@ -46,12 +51,60 @@ export function Home() {
           <StatusPill state={status.state} />
         </div>
         {profile ? (
-          <p className="muted mono" style={{ marginTop: "0.5rem" }}>
-            {summarizeProfile(profile)}
-          </p>
+          <>
+            {manualProfiles.length > 1 ? (
+              <div
+                className="row"
+                style={{
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginTop: "0.5rem",
+                  gap: "0.5rem",
+                }}
+              >
+                <select
+                  value={
+                    manualProfiles.some((p) => p.id === profile.id)
+                      ? profile.id
+                      : "__pool__"
+                  }
+                  onChange={(e) => {
+                    if (e.target.value !== "__pool__") {
+                      void setActiveById(e.target.value);
+                    }
+                  }}
+                  style={{ flex: 1, minWidth: 0 }}
+                  title="Switch active server (auto-reconnects if connected)"
+                >
+                  {manualProfiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.kind} · {p.address}:{p.port}
+                    </option>
+                  ))}
+                  {!manualProfiles.some((p) => p.id === profile.id) && (
+                    <option value="__pool__">
+                      {profile.name} (from pool)
+                    </option>
+                  )}
+                </select>
+                <Link to="/servers">
+                  <small className="dim">manage</small>
+                </Link>
+              </div>
+            ) : (
+              <p className="muted mono" style={{ marginTop: "0.5rem" }}>
+                {summarizeProfile(profile)}
+              </p>
+            )}
+            <ActiveServerStatus
+              uiProfile={profile}
+              backendProfileId={status.profileId}
+              connectionState={status.state}
+            />
+          </>
         ) : (
           <p className="muted">
-            <Link to="/profile">
+            <Link to="/servers">
               <FormattedMessage id="home.no_profile" />
             </Link>
           </p>
@@ -107,7 +160,9 @@ export function Home() {
               className="bigbtn danger"
               onClick={handleDisconnect}
               disabled={busy}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}
             >
+              <Power size={16} strokeWidth={2.5} />
               {disconnectLabel}
             </button>
           ) : (
@@ -116,7 +171,9 @@ export function Home() {
               className="bigbtn primary"
               onClick={handleConnect}
               disabled={inflight}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}
             >
+              <Power size={16} strokeWidth={2.5} />
               {connectLabel}
             </button>
           ))}
@@ -130,30 +187,48 @@ export function Home() {
           <strong>
             <FormattedMessage id="home.uplink" />
           </strong>
-          <span className="mono">{formatBytes(stats.uplinkBytes)}</span>
+          <span className="row" style={{ gap: "0.6rem" }}>
+            <span className="mono" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <ArrowUp size={13} strokeWidth={2.5} />
+              {formatRate(spark.up[spark.up.length - 1] ?? 0)}
+            </span>
+            <span className="mono dim">{formatBytes(stats.uplinkBytes)}</span>
+          </span>
         </div>
-        <TrafficSparkline values={spark.up} stroke="var(--accent)" />
 
         <div
           className="row"
-          style={{ justifyContent: "space-between", marginTop: "0.75rem" }}
+          style={{ justifyContent: "space-between", marginTop: "0.5rem" }}
         >
           <strong>
             <FormattedMessage id="home.downlink" />
           </strong>
-          <span className="mono">{formatBytes(stats.downlinkBytes)}</span>
+          <span className="row" style={{ gap: "0.6rem" }}>
+            <span className="mono" style={{ color: "var(--green)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <ArrowDown size={13} strokeWidth={2.5} />
+              {formatRate(spark.down[spark.down.length - 1] ?? 0)}
+            </span>
+            <span className="mono dim">{formatBytes(stats.downlinkBytes)}</span>
+          </span>
         </div>
-        <TrafficSparkline values={spark.down} stroke="var(--green)" />
 
-        {!stats.available && (
+        {!stats.available && isLive && (
           <p className="dim" style={{ marginTop: "0.5rem" }}>
             <small>
-              Stats API unreachable — Phase 2.5 will plumb the real
-              <code> xray api statsquery</code> output.
+              Stats API not reachable yet — counters appear once xray finishes
+              starting.
             </small>
           </p>
         )}
       </div>
+
+      {profile && (
+        <EgressCheckCard
+          isLive={status.state === "connected"}
+          activeProfileId={profile.id}
+          backendProfileId={status.profileId}
+        />
+      )}
     </>
   );
 }
@@ -161,4 +236,240 @@ export function Home() {
 function summarizeProfile(p: Profile): string {
   const endpoint = `${p.address}:${p.port}`;
   return `${p.kind} · ${endpoint}`;
+}
+
+/// Shows whether the running xray's outbound actually points at the
+/// currently-selected profile. The connection store exposes the backend's
+/// `profile_id` (set when xray was last spawned/restarted) — if that
+/// matches the UI's active id, we're routing through the chosen server.
+function ActiveServerStatus({
+  uiProfile,
+  backendProfileId,
+  connectionState,
+}: {
+  uiProfile: Profile;
+  backendProfileId: string | null;
+  connectionState: string;
+}) {
+  if (connectionState === "connecting") {
+    return (
+      <p className="dim mono" style={{ marginTop: "0.4rem", fontSize: "0.85em" }}>
+        <span style={{ color: "var(--yellow)" }}>● </span>
+        Switching to {uiProfile.address}:{uiProfile.port}…
+      </p>
+    );
+  }
+  if (connectionState !== "connected") {
+    return (
+      <p className="dim mono" style={{ marginTop: "0.4rem", fontSize: "0.85em" }}>
+        Click Connect to route through {uiProfile.address}:{uiProfile.port}.
+      </p>
+    );
+  }
+  const inSync = backendProfileId === uiProfile.id;
+  return (
+    <p
+      className="mono"
+      style={{
+        marginTop: "0.4rem",
+        fontSize: "0.85em",
+        color: inSync ? "var(--green)" : "var(--yellow)",
+      }}
+    >
+      ● {inSync
+        ? `Live on ${uiProfile.address}:${uiProfile.port}`
+        : "Reconnecting — backend still on the previous server"}
+    </p>
+  );
+}
+
+/// Egress-check panel. Calls `egress_check` (which proxies an HTTPS GET
+/// through the running xray to ifconfig.me) and shows the IP, with a
+/// short history so the user can see when the egress changes after a
+/// server switch — even when both servers share a CDN front and the
+/// difference lives in a /48 prefix.
+function EgressCheckCard({
+  isLive,
+  activeProfileId,
+  backendProfileId,
+}: {
+  isLive: boolean;
+  activeProfileId: string;
+  backendProfileId: string | null;
+}) {
+  const [current, setCurrent] = useState<EgressCheck | null>(null);
+  const [history, setHistory] = useState<{ ip: string; at: number }[]>([]);
+  const [busy, setBusy] = useState(false);
+  // Track the last (live, profileId) we successfully checked against, so
+  // we don't re-fire on every render.
+  const lastChecked = useRef<string | null>(null);
+  // Cancellation handle so an in-flight retry chain can be aborted when
+  // the user clicks Refresh manually or the connection drops.
+  const cancelRef = useRef<{ cancelled: boolean } | null>(null);
+
+  const recordResult = (r: EgressCheck) => {
+    setCurrent(r);
+    if (r.ok && r.ip) {
+      setHistory((prev) => {
+        const last = prev[0];
+        if (last && last.ip === r.ip) return prev;
+        return [{ ip: r.ip!, at: Date.now() }, ...prev].slice(0, 5);
+      });
+    }
+  };
+
+  // Single attempt — used by the manual Refresh button. The user
+  // clicked; cancel any in-flight auto-retry and run one shot, surfacing
+  // the actual error if it fails.
+  const runCheck = async () => {
+    if (cancelRef.current) cancelRef.current.cancelled = true;
+    setBusy(true);
+    try {
+      recordResult(await tauri.egressCheck());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Auto-run with backoff. xray's upstream TLS handshake to the VLESS
+  // server takes 1-3s after the supervisor flips to `connected` — the
+  // first egress check often races that and reports "request: error
+  // sending request". Retry a few times so the user sees the IP without
+  // having to click Refresh.
+  const runAutoCheck = async () => {
+    if (cancelRef.current) cancelRef.current.cancelled = true;
+    const token = { cancelled: false };
+    cancelRef.current = token;
+    setBusy(true);
+    try {
+      // Schedule: try now, then 700ms, 2s, 4s. Stop on first success or
+      // when cancelled (manual Refresh / disconnect / profile change).
+      const delaysMs: number[] = [0, 700, 2000, 4000];
+      for (const delay of delaysMs) {
+        if (token.cancelled) return;
+        if (delay > 0) {
+          await new Promise<void>((resolve) =>
+            window.setTimeout(resolve, delay),
+          );
+          if (token.cancelled) return;
+        }
+        const r = await tauri.egressCheck();
+        if (token.cancelled) return;
+        if (r.ok) {
+          recordResult(r);
+          return;
+        }
+        // Surface the most recent error so the panel doesn't look empty
+        // mid-retry. Final attempt's error is what the user sees if all
+        // retries fail.
+        recordResult(r);
+      }
+    } finally {
+      if (!token.cancelled) setBusy(false);
+    }
+  };
+
+  // Auto-run when we're live AND the backend matches the UI selection
+  // (so the check actually probes the chosen server), and the
+  // (state, backend profile) tuple has changed since last run.
+  useEffect(() => {
+    if (!isLive || backendProfileId !== activeProfileId) return;
+    const key = `${activeProfileId}@${backendProfileId}`;
+    if (lastChecked.current === key) return;
+    lastChecked.current = key;
+    void runAutoCheck();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLive, activeProfileId, backendProfileId]);
+
+  // Reset history when we go offline so a stale IP doesn't masquerade as
+  // the current egress, and cancel any in-flight retry chain.
+  useEffect(() => {
+    if (!isLive) {
+      if (cancelRef.current) cancelRef.current.cancelled = true;
+      setCurrent(null);
+      setBusy(false);
+      lastChecked.current = null;
+    }
+  }, [isLive]);
+
+  return (
+    <div className="card">
+      <div
+        className="row"
+        style={{ justifyContent: "space-between", alignItems: "baseline" }}
+      >
+        <strong>Egress IP</strong>
+        <button
+          onClick={() => void runCheck()}
+          disabled={!isLive || busy}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          <RefreshCw size={13} strokeWidth={2.4} className={busy ? "spin" : undefined} />
+          {busy ? "Checking…" : "Refresh"}
+        </button>
+      </div>
+      <p className="dim" style={{ margin: "0.3rem 0 0.6rem" }}>
+        <small>
+          What ifconfig.me sees through the proxy. If both servers share a
+          CDN front (e.g. Cloudflare), watch for the prefix change — that
+          confirms the switch reached the wire.
+        </small>
+      </p>
+      {!isLive ? (
+        <p className="dim mono">
+          <small>(connect to probe)</small>
+        </p>
+      ) : current === null ? (
+        <p className="dim mono">
+          <small>{busy ? "checking…" : "—"}</small>
+        </p>
+      ) : current.ok ? (
+        <>
+          <div
+            className="mono"
+            style={{
+              fontSize: "1.1em",
+              color: "var(--green)",
+              wordBreak: "break-all",
+            }}
+          >
+            {current.ip}
+            {current.elapsedMs !== null && (
+              <span className="dim" style={{ marginLeft: "0.5rem", fontSize: "0.8em" }}>
+                ({current.elapsedMs} ms)
+              </span>
+            )}
+          </div>
+          {history.length > 1 && (
+            <details style={{ marginTop: "0.5rem" }}>
+              <summary className="dim" style={{ cursor: "pointer" }}>
+                <small>Last {history.length} unique egresses</small>
+              </summary>
+              <ul
+                className="mono"
+                style={{
+                  margin: "0.4rem 0 0",
+                  paddingLeft: "1.25rem",
+                  fontSize: "0.85em",
+                }}
+              >
+                {history.map((h, i) => (
+                  <li key={`${h.at}-${h.ip}`} style={{ color: i === 0 ? "var(--fg)" : "var(--fg-2)" }}>
+                    {h.ip}
+                    <span className="dim" style={{ marginLeft: "0.5rem" }}>
+                      {new Date(h.at).toLocaleTimeString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      ) : (
+        <div className="mono" style={{ color: "var(--yellow)", wordBreak: "break-all" }}>
+          {current.error ?? "check failed"}
+        </div>
+      )}
+    </div>
+  );
 }

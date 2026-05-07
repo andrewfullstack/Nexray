@@ -4,9 +4,8 @@ import { I18nProvider } from "./lib/i18n";
 import { Layout } from "./components/Layout";
 import { AddServer } from "./pages/AddServer";
 import { Home } from "./pages/Home";
-import { Pool } from "./pages/Pool";
-import { ProfileEditor } from "./pages/ProfileEditor";
 import { Routing } from "./pages/Routing";
+import { Servers } from "./pages/Servers";
 import { Settings } from "./pages/Settings";
 import { Subscriptions } from "./pages/Subscriptions";
 import { useProfileStore } from "./stores/profile";
@@ -49,10 +48,15 @@ export function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<Home />} />
-            <Route path="profile" element={<ProfileEditor />} />
-            <Route path="add-server" element={<AddServer />} />
+            <Route path="servers" element={<Servers />} />
+            <Route path="servers/new" element={<AddServer />} />
+            <Route path="servers/:id" element={<AddServer />} />
+            {/* Legacy route aliases — keep old hash links working. */}
+            <Route path="profile" element={<Navigate to="/servers" replace />} />
+            <Route path="add-server" element={<Navigate to="/servers/new" replace />} />
             <Route path="subscriptions" element={<Subscriptions />} />
-            <Route path="pool" element={<Pool />} />
+            {/* Legacy: pool is gone; the Servers page hosts the probe now. */}
+            <Route path="pool" element={<Navigate to="/servers" replace />} />
             <Route path="routing" element={<Routing />} />
             <Route path="settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />

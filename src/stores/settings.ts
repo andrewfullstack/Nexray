@@ -10,7 +10,6 @@ interface SettingsStore {
 
   hydrate: () => Promise<void>;
   setAutoUpdate: (v: boolean) => Promise<void>;
-  setTelemetry: (v: boolean) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -30,16 +29,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setAutoUpdate: async (v) => {
     const settings = { ...get().settings, autoUpdateOptIn: v };
-    try {
-      const saved = await tauri.settingsSet(settings);
-      set({ settings: saved });
-    } catch (e) {
-      set({ error: errMsg(e) });
-    }
-  },
-
-  setTelemetry: async (v) => {
-    const settings = { ...get().settings, telemetryOptIn: v };
     try {
       const saved = await tauri.settingsSet(settings);
       set({ settings: saved });

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { SystemProxyStatus } from "../lib/ipc";
 import { tauri } from "../lib/tauri";
+import { useTunStore } from "../stores/tun";
+import { InfoTip } from "./InfoTip";
 
 const initial: SystemProxyStatus = {
   enabled: false,
@@ -25,9 +27,25 @@ export function SystemProxyToggle({ canEnable }: { canEnable: boolean }) {
   const onToggle = async () => {
     setBusy(true);
     try {
-      const next = status.enabled
-        ? await tauri.systemProxyDisable()
-        : await tauri.systemProxyEnable();
+      if (status.enabled) {
+        const next = await tauri.systemProxyDisable();
+        setStatus(next);
+        return;
+      }
+      // Mutual exclusion with TUN: if TUN is currently capturing all
+      // system traffic at the IP layer, also pointing OS-level apps at
+      // the SOCKS listener double-routes them (proxy-aware app → SOCKS →
+      // xray, AND its packets go through utun → tun2socks → xray
+      // anyway). Tear TUN down first.
+      const tun = useTunStore.getState();
+      if (tun.status.state === "active" || tun.status.state === "starting") {
+        try {
+          await tun.disable();
+        } catch (e) {
+          console.warn("could not disable TUN before system proxy:", e);
+        }
+      }
+      const next = await tauri.systemProxyEnable();
       setStatus(next);
     } catch (e) {
       alert(
@@ -54,12 +72,43 @@ export function SystemProxyToggle({ canEnable }: { canEnable: boolean }) {
     >
       <div>
         <strong>System proxy</strong>
-        <span
-          className="dim"
-          style={{ marginLeft: "0.5rem" }}
-          title="Sets the macOS SOCKS proxy to Nexray's listener via networksetup. Most apps (Safari, Chrome, curl) will route through it automatically. Real VPN-style 'Settings → VPN' integration needs an Apple Developer Program membership + Network Extension entitlement; see docs/MACOS_VPN.md."
-        >
-          ⓘ
+        <span style={{ marginLeft: "0.4rem" }}>
+          <InfoTip>
+            <p className="heading">System proxy</p>
+            <p>
+              Points the operating system&rsquo;s SOCKS5 proxy setting at
+              Nexray&rsquo;s loopback listener. Most proxy-aware apps
+              (browsers, curl, package managers) automatically pick it up.
+            </p>
+            <p className="heading">Per platform</p>
+            <ul>
+              <li>
+                <strong>macOS</strong>: writes via <code>networksetup</code>{" "}
+                on the active network service.
+              </li>
+              <li>
+                <strong>Windows</strong>: sets the WinINet proxy registry +
+                broadcasts <code>InternetSetOptionW</code> so running apps
+                pick it up immediately.
+              </li>
+              <li>
+                <strong>Linux</strong>: writes the GNOME{" "}
+                <code>org.gnome.system.proxy</code> keys via{" "}
+                <code>gsettings</code>.
+              </li>
+            </ul>
+            <p className="heading">Caveats</p>
+            <ul>
+              <li>
+                Apps that ignore system proxy (games, custom DNS clients,
+                native binaries) won&rsquo;t be routed — use TUN mode for
+                whole-system capture.
+              </li>
+              <li>
+                Settings restore automatically on app exit.
+              </li>
+            </ul>
+          </InfoTip>
         </span>
         <p className="dim" style={{ margin: "0.25rem 0 0" }}>
           <small>{subtitle}</small>
@@ -67,11 +116,11 @@ export function SystemProxyToggle({ canEnable }: { canEnable: boolean }) {
       </div>
       <button
         type="button"
-        className={status.enabled ? "danger" : "primary"}
+        className={`toggle-btn ${status.enabled ? "danger" : "primary"}`}
         onClick={() => void onToggle()}
         disabled={busy || (!status.enabled && !canEnable)}
       >
-        {status.enabled ? "Stop system proxy" : "Start system proxy"}
+        {status.enabled ? "Stop" : "Start"}
       </button>
     </div>
   );

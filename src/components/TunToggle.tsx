@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { useTunStore } from "../stores/tun";
+import { tauri } from "../lib/tauri";
+import { InfoTip } from "./InfoTip";
 
 export function TunToggle({ canEnable }: { canEnable: boolean }) {
   const { status, capabilities, busy, hydrate, pollStatus, enable, disable } =
@@ -17,8 +19,22 @@ export function TunToggle({ canEnable }: { canEnable: boolean }) {
 
   const handleToggle = async () => {
     try {
-      if (isOn) await disable();
-      else await enable();
+      if (isOn) {
+        await disable();
+        return;
+      }
+      // Mutual exclusion with system proxy: if it's currently routing
+      // OS-level traffic at the SOCKS listener, leaving it on while TUN
+      // captures the same traffic at the IP layer creates double-routing
+      // (apps point at SOCKS, kernel routes their packets via utun
+      // anyway). Tear it down before starting TUN.
+      const proxyStatus = await tauri.systemProxyStatus().catch(() => null);
+      if (proxyStatus?.enabled) {
+        await tauri.systemProxyDisable().catch((e) => {
+          console.warn("could not disable system proxy before TUN:", e);
+        });
+      }
+      await enable();
     } catch (e) {
       alert(`TUN failed: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -36,12 +52,46 @@ export function TunToggle({ canEnable }: { canEnable: boolean }) {
     >
       <div>
         <strong>TUN mode</strong>
-        <span
-          className="dim"
-          style={{ marginLeft: "0.5rem" }}
-          title={tunTooltip(supported, capabilities?.reason ?? null, status.state)}
-        >
-          ⓘ
+        <span style={{ marginLeft: "0.4rem" }}>
+          <InfoTip>
+            <p className="heading">TUN mode</p>
+            <p>
+              Captures every packet from your machine — including UDP and
+              apps that ignore system proxy settings (games, native
+              binaries, custom DNS clients) — and routes it through the
+              proxy via a virtual network interface.
+            </p>
+            <p className="heading">Privilege requirements</p>
+            <ul>
+              <li>
+                <strong>macOS</strong>: prompts for sudo to bring up the{" "}
+                <code>utun</code> interface.
+              </li>
+              <li>
+                <strong>Windows</strong>: triggers UAC; bundles the{" "}
+                <code>wintun</code> adapter.
+              </li>
+              <li>
+                <strong>Linux</strong>: needs <code>CAP_NET_ADMIN</code> or
+                sudo.
+              </li>
+            </ul>
+            {!supported && capabilities?.reason && (
+              <>
+                <p className="heading">Currently disabled</p>
+                <p>{capabilities.reason}</p>
+              </>
+            )}
+            {status.state === "failed" && (
+              <>
+                <p className="heading">Last attempt failed</p>
+                <p>
+                  If you saw a permissions error, re-run the app with admin
+                  rights or grant <code>CAP_NET_ADMIN</code>.
+                </p>
+              </>
+            )}
+          </InfoTip>
         </span>
         <p className="dim" style={{ margin: "0.25rem 0 0" }}>
           <small>{tunSubtitle(status, capabilities)}</small>
@@ -54,11 +104,11 @@ export function TunToggle({ canEnable }: { canEnable: boolean }) {
       </div>
       <button
         type="button"
-        className={isOn ? "danger" : "primary"}
+        className={`toggle-btn ${isOn ? "danger" : "primary"}`}
         onClick={() => void handleToggle()}
         disabled={disabled}
       >
-        {isOn ? "Stop TUN" : "Start TUN"}
+        {isOn ? "Stop" : "Start"}
       </button>
     </div>
   );
@@ -83,27 +133,3 @@ function tunSubtitle(
   }
 }
 
-function tunTooltip(
-  supported: boolean,
-  reason: string | null,
-  state: string,
-): string {
-  const lines: string[] = [];
-  lines.push(
-    "TUN mode captures every packet from your machine, including UDP and apps that don't honor system proxy settings.",
-  );
-  lines.push("");
-  lines.push("Privilege requirements:");
-  lines.push("  · macOS: prompts for sudo to bring up the utun interface.");
-  lines.push("  · Windows: triggers UAC; bundles the wintun adapter.");
-  lines.push("  · Linux: needs CAP_NET_ADMIN or sudo.");
-  if (!supported && reason) {
-    lines.push("");
-    lines.push(`Currently disabled: ${reason}`);
-  }
-  if (state === "failed") {
-    lines.push("");
-    lines.push("If you saw a permissions error, re-run the app with admin rights or grant CAP_NET_ADMIN.");
-  }
-  return lines.join("\n");
-}

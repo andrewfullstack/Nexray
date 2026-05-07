@@ -245,6 +245,14 @@ pub fn routing_rules_for(settings: &RoutingSettings) -> Vec<Value> {
 /// Same as `routing_rules_for` but interleaves `extra_rules` (e.g. parsed
 /// from `rules.conf`) between user CustomRules and the preset baseline.
 /// Order: in-memory CustomRules → extra_rules → preset.
+///
+/// Kill-switch presets (Direct, Global) keep only `block`-tagged
+/// `extra_rules`. Otherwise a CN-direct rule like
+/// `DOMAIN-SUFFIX,cn,DIRECT` would override Global's catch-all proxy, so
+/// every `.cn` domain (including `ip.cn`) leaks the user's home IP. By
+/// dropping the direct/proxy decisions in rules.conf — and keeping only
+/// block rules so ad-filtering still works — Global truly proxies
+/// everything and Direct truly directs everything.
 pub fn routing_rules_with_extra(settings: &RoutingSettings, extra_rules: &[Value]) -> Vec<Value> {
     let mut out: Vec<Value> = settings
         .custom_rules
@@ -252,9 +260,30 @@ pub fn routing_rules_with_extra(settings: &RoutingSettings, extra_rules: &[Value
         .filter(|r| r.enabled)
         .map(custom_rule_to_xray)
         .collect();
-    out.extend(extra_rules.iter().cloned());
+    if is_kill_switch_preset(settings.preset) {
+        out.extend(
+            extra_rules
+                .iter()
+                .filter(|r| {
+                    r.get("outboundTag").and_then(Value::as_str) == Some("block")
+                })
+                .cloned(),
+        );
+    } else {
+        out.extend(extra_rules.iter().cloned());
+    }
     out.extend(preset_rules(settings.preset));
     out
+}
+
+/// Direct + Global presets are user-facing kill-switches: "everything
+/// direct" / "everything proxy". Honoring rules.conf direct/proxy
+/// decisions in those modes defeats the kill-switch — most prominently a
+/// CN-direct rule that leaks home IPs in Global. Block decisions in
+/// rules.conf (ad-blocking) are kept so the kill-switch doesn't disable
+/// ad filtering.
+fn is_kill_switch_preset(p: RoutingPreset) -> bool {
+    matches!(p, RoutingPreset::Direct | RoutingPreset::Global)
 }
 
 /// Translate a single `CustomRule` into Xray's `routing.rules[]` entry shape.
@@ -336,7 +365,15 @@ fn preset_rules(preset: RoutingPreset) -> Vec<Value> {
 /// DNS config per §6.1: AliDNS (domestic) for `geosite:cn`, DoH (proxy) for
 /// everything not in CN. The `expectIPs: ["geoip:cn"]` filter on the domestic
 /// resolver guards against poisoned answers — if Ali returns a non-CN IP for
-/// a CN-listed domain we fall back to the proxy resolver.
+/// a CN-listed domain xray treats that server as having no answer.
+///
+/// Without a fallback that path was a dead end: legitimate `.cn` domains
+/// hosted abroad (e.g. `ip.cn` on Meteverse US/AU, many CDN-fronted CN
+/// services) match `geosite:cn`, get rejected by the `expectIPs` filter,
+/// and have nowhere else to resolve from — so xray's freedom outbound
+/// times out on `dialing TCP to tcp:host:443`. Adding the proxy resolver
+/// (no domain filter, no expectIPs) as a third entry makes it the
+/// catch-all that handles those rejected queries.
 pub fn dns_for(dns: &DnsConfig) -> Value {
     json!({
         "servers": [
@@ -348,7 +385,11 @@ pub fn dns_for(dns: &DnsConfig) -> Value {
                 "address": dns.domestic_resolver,
                 "domains": ["geosite:cn"],
                 "expectIPs": ["geoip:cn"]
-            }
+            },
+            // Catch-all fallback. xray uses string-form server entries as
+            // the "no domain filter" tier, used when an earlier matching
+            // server rejects via expectIPs or returns no answer.
+            dns.proxy_resolver
         ]
     })
 }

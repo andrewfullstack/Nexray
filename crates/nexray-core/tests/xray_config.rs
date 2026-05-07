@@ -113,6 +113,17 @@ fn dns_uses_alidns_for_cn_and_doh_for_proxy() {
     assert!(dns.contains("223.5.5.5"));
     assert!(dns.contains("geosite:cn"));
     assert!(dns.contains("geoip:cn"));
+    // §6.1 fallback: the proxy resolver must also appear as a string-form
+    // catch-all so `.cn` domains hosted on foreign IPs (rejected by the
+    // expectIPs filter) still resolve.
+    let servers = cfg["dns"]["servers"].as_array().expect("servers array");
+    let has_string_fallback = servers
+        .iter()
+        .any(|s| s.is_string() && s.as_str() == Some("https://1.1.1.1/dns-query"));
+    assert!(
+        has_string_fallback,
+        "expected a string-form fallback DoH server for unfiltered queries; got {servers:?}"
+    );
 }
 
 #[test]
@@ -197,6 +208,88 @@ fn direct_preset_routes_everything_direct_with_ads_blocked() {
     // The catch-all rule sends to `direct`, not `proxy`.
     let last = rules.last().expect("last");
     assert_eq!(last["outboundTag"], "direct");
+}
+
+#[test]
+fn kill_switch_presets_drop_direct_and_proxy_extras_keep_block() {
+    use serde_json::json;
+    // Simulated extra_rules from a translated rules.conf — what
+    // `connect`/`reload_sidecar_with_current_routing` passes to materialize.
+    let extras = vec![
+        json!({"type": "field", "domain": ["domain:cn"], "outboundTag": "direct"}),
+        json!({"type": "field", "domain": ["full:foo.example"], "outboundTag": "proxy"}),
+        json!({"type": "field", "domain": ["domain:ads.example"], "outboundTag": "block"}),
+    ];
+    for preset in [RoutingPreset::Direct, RoutingPreset::Global] {
+        let cfg = materialize(
+            &parse(VALID_CDN_WS),
+            &XrayConfigOptions {
+                routing: RoutingSettings {
+                    preset,
+                    custom_rules: vec![],
+                    dns: default_routing_settings().dns,
+                },
+                extra_rules: extras.clone(),
+                ..Default::default()
+            },
+        )
+        .expect("materialize");
+        let rules = cfg["routing"]["rules"].as_array().expect("rules array");
+        let joined = rules
+            .iter()
+            .map(|r| r.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // The .cn-direct rule MUST NOT survive — that's the bug fix
+        // (otherwise Global leaks the home IP for ip.cn).
+        assert!(
+            !joined.contains("domain:cn"),
+            "{preset:?}: extras direct rule survived: {joined}"
+        );
+        assert!(
+            !joined.contains("full:foo.example"),
+            "{preset:?}: extras proxy rule survived"
+        );
+        // Block rule from rules.conf MUST survive so ad-filtering keeps
+        // working in kill-switch modes.
+        assert!(
+            joined.contains("domain:ads.example"),
+            "{preset:?}: extras block rule was dropped"
+        );
+    }
+}
+
+#[test]
+fn default_preset_keeps_all_extras() {
+    use serde_json::json;
+    let extras = vec![
+        json!({"type": "field", "domain": ["domain:cn"], "outboundTag": "direct"}),
+        json!({"type": "field", "domain": ["full:foo.example"], "outboundTag": "proxy"}),
+        json!({"type": "field", "domain": ["domain:ads.example"], "outboundTag": "block"}),
+    ];
+    let cfg = materialize(
+        &parse(VALID_CDN_WS),
+        &XrayConfigOptions {
+            routing: RoutingSettings {
+                preset: RoutingPreset::Default,
+                custom_rules: vec![],
+                dns: default_routing_settings().dns,
+            },
+            extra_rules: extras.clone(),
+            ..Default::default()
+        },
+    )
+    .expect("materialize");
+    let joined = cfg["routing"]["rules"]
+        .as_array()
+        .expect("rules array")
+        .iter()
+        .map(|r| r.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("domain:cn"));
+    assert!(joined.contains("full:foo.example"));
+    assert!(joined.contains("domain:ads.example"));
 }
 
 #[test]

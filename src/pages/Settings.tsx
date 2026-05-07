@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useSettingsStore } from "../stores/settings";
 
 export function Settings() {
-  const { settings, info, loading, error, hydrate, setAutoUpdate, setTelemetry } =
+  const { settings, info, loading, error, hydrate, setAutoUpdate } =
     useSettingsStore();
 
   useEffect(() => {
@@ -21,13 +21,6 @@ export function Settings() {
           on={settings.autoUpdateOptIn}
           onChange={(v) => void setAutoUpdate(v)}
           help="Check for new releases on startup and prompt to install. Off by default; the app never phones home unless you enable this."
-        />
-
-        <Toggle
-          label="Telemetry / crash reporting"
-          on={settings.telemetryOptIn}
-          onChange={(v) => void setTelemetry(v)}
-          help="Per DEVELOPMENT.md §12 rule 5, no telemetry is implemented. This toggle exists so a future opt-in is auditable; flipping it on right now does nothing."
         />
 
         {error && <div className="flash err">{error}</div>}

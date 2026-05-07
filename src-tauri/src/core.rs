@@ -85,6 +85,14 @@ impl XraySidecar {
         lock(&self.inner).pid_file = Some(path);
     }
 
+    /// Path to the xray binary this supervisor spawns. Used by the
+    /// stats client to reach the same binary for `xray api statsquery`
+    /// shell-outs (mismatching xray versions could speak different
+    /// protobuf shapes).
+    pub fn binary_path(&self) -> PathBuf {
+        lock(&self.inner).binary_path.clone()
+    }
+
     pub fn start(
         &self,
         profile_id: String,

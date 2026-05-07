@@ -1,10 +1,9 @@
 import { create } from "zustand";
-import type { AddSubscriptionRequest, PoolEntry, Subscription } from "../lib/ipc";
+import type { AddSubscriptionRequest, Subscription } from "../lib/ipc";
 import { tauri } from "../lib/tauri";
 
 interface SubscriptionsStore {
   subs: Subscription[];
-  pool: PoolEntry[];
   loading: boolean;
   error: string | null;
 
@@ -12,19 +11,17 @@ interface SubscriptionsStore {
   add: (req: AddSubscriptionRequest) => Promise<void>;
   remove: (id: string) => Promise<void>;
   refreshOne: (id: string) => Promise<void>;
-  probeAll: () => Promise<void>;
 }
 
 export const useSubscriptionsStore = create<SubscriptionsStore>((set) => ({
   subs: [],
-  pool: [],
   loading: true,
   error: null,
 
   refresh: async () => {
     try {
-      const [subs, pool] = await Promise.all([tauri.subscriptionsList(), tauri.poolList()]);
-      set({ subs, pool, loading: false, error: null });
+      const subs = await tauri.subscriptionsList();
+      set({ subs, loading: false, error: null });
     } catch (e) {
       set({ loading: false, error: errMsg(e) });
     }
@@ -34,8 +31,8 @@ export const useSubscriptionsStore = create<SubscriptionsStore>((set) => ({
     set({ error: null });
     try {
       await tauri.subscriptionAdd(req);
-      const [subs, pool] = await Promise.all([tauri.subscriptionsList(), tauri.poolList()]);
-      set({ subs, pool });
+      const subs = await tauri.subscriptionsList();
+      set({ subs });
     } catch (e) {
       set({ error: errMsg(e) });
       throw e;
@@ -44,24 +41,19 @@ export const useSubscriptionsStore = create<SubscriptionsStore>((set) => ({
 
   remove: async (id) => {
     await tauri.subscriptionDelete(id);
-    const [subs, pool] = await Promise.all([tauri.subscriptionsList(), tauri.poolList()]);
-    set({ subs, pool });
+    const subs = await tauri.subscriptionsList();
+    set({ subs });
   },
 
   refreshOne: async (id) => {
     set({ error: null });
     try {
       await tauri.subscriptionRefresh(id);
-      const [subs, pool] = await Promise.all([tauri.subscriptionsList(), tauri.poolList()]);
-      set({ subs, pool });
+      const subs = await tauri.subscriptionsList();
+      set({ subs });
     } catch (e) {
       set({ error: errMsg(e) });
     }
-  },
-
-  probeAll: async () => {
-    const pool = await tauri.poolProbeAll();
-    set({ pool });
   },
 }));
 

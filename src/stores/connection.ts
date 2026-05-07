@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ConnectionStatus, TrafficStats } from "../lib/ipc";
 import { tauri } from "../lib/tauri";
 import type { Profile } from "../lib/profile";
+import { useTunStore } from "./tun";
 
 const POLL_MS = 1000;
 const SPARK_LEN = 60; // 60 samples ≈ last minute of bytes/sec
@@ -116,6 +117,11 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
     try {
       const status = await tauri.disconnect();
       set({ status, stats: initialStats });
+      // Backend disconnect cascades TUN + system-proxy teardown.
+      // Trigger an immediate refresh of the TUN store so the toggle
+      // flips without waiting for its 2s poll. SystemProxyToggle
+      // refreshes via its own 3s poll.
+      void useTunStore.getState().pollStatus();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("disconnect failed", e);

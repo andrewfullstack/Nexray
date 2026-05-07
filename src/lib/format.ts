@@ -10,3 +10,9 @@ export function formatBytes(n: number): string {
   }
   return `${v.toFixed(0)} PB`;
 }
+
+/** Per-second rate. Values < 1 KB/s show as `0 KB/s` for stable layout. */
+export function formatRate(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec < 0) return "—";
+  return `${formatBytes(bytesPerSec)}/s`;
+}

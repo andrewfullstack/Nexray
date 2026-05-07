@@ -5,7 +5,7 @@
 export const en: Record<string, string> = {
   "app.title": "Nexray",
   "nav.home": "Connection",
-  "nav.profile": "Profile",
+  "nav.servers": "Servers",
 
   "status.disconnected": "Disconnected",
   "status.connecting": "Connecting…",
@@ -14,7 +14,7 @@ export const en: Record<string, string> = {
 
   "home.connect": "Connect",
   "home.disconnect": "Disconnect",
-  "home.no_profile": "No profile saved yet — open the Profile tab to add one.",
+  "home.no_profile": "No active server. Open the Servers tab to add one.",
   "home.uplink": "Up",
   "home.downlink": "Down",
   "home.profile_summary": "{kind} · {endpoint}",

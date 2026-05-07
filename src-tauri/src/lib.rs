@@ -44,8 +44,7 @@ pub fn run() {
             commands::subscription_add,
             commands::subscription_delete,
             commands::subscription_refresh,
-            commands::pool_list,
-            commands::pool_probe_all,
+            commands::probe_profiles,
             commands::routing_get,
             commands::routing_set,
             commands::tun_capabilities,
@@ -65,6 +64,7 @@ pub fn run() {
             commands::rules_file_set_destination,
             commands::rules_file_delete,
             commands::rules_file_reset,
+            commands::egress_check,
         ])
         .setup(|app| {
             tray::install(app)?;
