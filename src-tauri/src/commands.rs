@@ -153,7 +153,10 @@ pub async fn traffic_stats(state: State<'_, AppState>) -> Result<TrafficStats, S
             return Ok(StatsClient::unavailable());
         };
         let s = sidecar.status();
-        if !matches!(s.state, ConnectionState::Connected | ConnectionState::Connecting) {
+        if !matches!(
+            s.state,
+            ConnectionState::Connected | ConnectionState::Connecting
+        ) {
             return Ok(StatsClient::unavailable());
         }
         let Some(port) = *port_guard else {
@@ -171,9 +174,7 @@ pub async fn traffic_stats(state: State<'_, AppState>) -> Result<TrafficStats, S
 /// actual /48 differs). Returns `None`-shaped sentinel when not
 /// connected so the UI can disable the panel cleanly.
 #[tauri::command]
-pub async fn egress_check(
-    state: State<'_, AppState>,
-) -> Result<EgressCheckResponse, String> {
+pub async fn egress_check(state: State<'_, AppState>) -> Result<EgressCheckResponse, String> {
     let socks_port = {
         let guard = state.sidecar.lock().map_err(|e| e.to_string())?;
         let Some(sidecar) = guard.as_ref() else {
@@ -1049,10 +1050,7 @@ pub async fn rules_file_set_destination(
 }
 
 #[tauri::command]
-pub async fn rules_file_reset(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn rules_file_reset(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let path = rules_conf_path(&app)?;
     let dir = path.parent().ok_or_else(|| "no parent dir".to_string())?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

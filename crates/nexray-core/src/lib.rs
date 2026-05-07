@@ -20,10 +20,10 @@ pub use skip_reason::SkipReason;
 pub use subscription::{classify_subscription, summarize_skipped, ClassifyResult, SkippedEntry};
 pub use types_gen::{
     AddSubscriptionRequest, Alpn, AppInfo, AppSettings, CdnWsProfile, ConnectRequest,
-    ConnectionState, ConnectionStatus, CustomRule, DnsConfig, Fingerprint, PoolEntry, Profile,
-    RealityProfile, RoutingDestination, RoutingMatcherType, RoutingPreset, RoutingSettings,
-    SetRoutingRequest, SetSettingsRequest, Subscription, SubscriptionIdRequest, SystemProxyStatus,
-    TrafficStats, TunCapabilities, TunState, TunStatus,
+    ConnectionState, ConnectionStatus, CustomRule, DnsConfig, Fingerprint, Profile, RealityProfile,
+    RoutingDestination, RoutingMatcherType, RoutingPreset, RoutingSettings, SetRoutingRequest,
+    SetSettingsRequest, Subscription, SubscriptionIdRequest, SystemProxyStatus, TrafficStats,
+    TunCapabilities, TunState, TunStatus,
 };
 
 /// Whitelist of uTLS fingerprints accepted by the parser. Mirrors

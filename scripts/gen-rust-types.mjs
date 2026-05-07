@@ -131,15 +131,6 @@ const IPC_STRUCTS = {
       ["profiles", "Vec<Profile>"],
     ],
   },
-  PoolEntry: {
-    fields: [
-      ["subscriptionId", "string"],
-      ["subscriptionName", "string"],
-      ["profile", "Profile"],
-      ["latencyMs", "u32|null"],
-      ["lastProbeMs", "u64|null"],
-    ],
-  },
   AddSubscriptionRequest: {
     fields: [
       ["url", "string"],

@@ -264,9 +264,7 @@ pub fn routing_rules_with_extra(settings: &RoutingSettings, extra_rules: &[Value
         out.extend(
             extra_rules
                 .iter()
-                .filter(|r| {
-                    r.get("outboundTag").and_then(Value::as_str) == Some("block")
-                })
+                .filter(|r| r.get("outboundTag").and_then(Value::as_str) == Some("block"))
                 .cloned(),
         );
     } else {

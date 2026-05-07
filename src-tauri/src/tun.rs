@@ -196,11 +196,9 @@ impl TunSupervisor {
                         }
                     }
                     if std::time::Instant::now() >= deadline {
-                        break Err(
-                            "timed out waiting for launcher pidfile (60s) — admin \
+                        break Err("timed out waiting for launcher pidfile (60s) — admin \
                              prompt not answered or launcher script never ran"
-                                .into(),
-                        );
+                            .into());
                     }
                     std::thread::sleep(std::time::Duration::from_millis(150));
                 };
@@ -609,7 +607,10 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
     let bypass_list = p
         .bypass_ips
         .iter()
-        .filter(|ip| ip.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == ':'))
+        .filter(|ip| {
+            ip.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == ':')
+        })
         .cloned()
         .collect::<Vec<_>>()
         .join(" ");
@@ -894,9 +895,7 @@ fn drain_lines<R: std::io::Read + Send + 'static>(
         let lower = line.to_ascii_lowercase();
         let is_error = lower.contains("fatal") || lower.contains("error");
         if is_error && inner.last_error.is_none() {
-            let msg = if lower.contains("operation not permitted")
-                && lower.contains("create tun")
-            {
+            let msg = if lower.contains("operation not permitted") && lower.contains("create tun") {
                 format!(
                     "{line} — TUN device creation requires admin/root; \
                      launch with sudo or grant the helper tool \

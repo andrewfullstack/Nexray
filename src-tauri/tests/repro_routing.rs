@@ -25,9 +25,7 @@ use std::time::{Duration, Instant};
 
 use nexray_core::rules_conf;
 use nexray_core::xray_config::{default_routing_settings, materialize, XrayConfigOptions};
-use nexray_core::{
-    decode_share_link, DecodeResult, Profile, RoutingPreset, RoutingSettings,
-};
+use nexray_core::{decode_share_link, DecodeResult, Profile, RoutingPreset, RoutingSettings};
 
 const REAL_XRAY: &str =
     "/Users/yangqi/Documents/github/nexray/src-tauri/binaries/Xray-macos-arm64-v8a/xray";
@@ -177,9 +175,11 @@ fn routing_presets_route_as_expected() {
         });
         // Drain stderr to avoid pipe-full deadlock (it's empty in practice but keep safe).
         let stderr = child.stderr.take().expect("stderr");
-        thread::spawn(move || {
-            for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
-        });
+        thread::spawn(
+            move || {
+                for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
+            },
+        );
 
         // Wait for SOCKS port to come up.
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -387,20 +387,26 @@ fn egress_check_actually_proxies_through_xray() {
         .args(["--max-time", "8", "--silent", "https://ifconfig.me/ip"])
         .output()
         .unwrap();
-    let direct_ip = String::from_utf8_lossy(&direct_out.stdout).trim().to_string();
+    let direct_ip = String::from_utf8_lossy(&direct_out.stdout)
+        .trim()
+        .to_string();
     println!("  direct egress: {}", direct_ip);
 
     // Run reqwest with the same setup the egress_check command uses.
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let proxied_ip = runtime.block_on(async {
-        let proxy = reqwest::Proxy::all(format!("socks5h://127.0.0.1:{socks_port}"))
-            .expect("proxy parse");
+        let proxy =
+            reqwest::Proxy::all(format!("socks5h://127.0.0.1:{socks_port}")).expect("proxy parse");
         let client = reqwest::Client::builder()
             .proxy(proxy)
             .timeout(Duration::from_secs(8))
             .build()
             .expect("client");
-        let resp = client.get("https://ifconfig.me/ip").send().await.expect("send");
+        let resp = client
+            .get("https://ifconfig.me/ip")
+            .send()
+            .await
+            .expect("send");
         assert!(resp.status().is_success(), "got {}", resp.status());
         resp.text().await.expect("body").trim().to_string()
     });
@@ -476,9 +482,11 @@ fn diagnose_running_app_default_preset_cn_route() {
         }
     });
     let stderr = child.stderr.take().unwrap();
-    thread::spawn(move || {
-        for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
-    });
+    thread::spawn(
+        move || {
+            for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
+        },
+    );
 
     // Wait for SOCKS bind.
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -494,7 +502,11 @@ fn diagnose_running_app_default_preset_cn_route() {
         thread::sleep(Duration::from_millis(50));
     }
 
-    for url in &["https://ip.cn", "https://www.baidu.com", "https://ifconfig.me"] {
+    for url in &[
+        "https://ip.cn",
+        "https://www.baidu.com",
+        "https://ifconfig.me",
+    ] {
         let host = url
             .trim_start_matches("https://")
             .split('/')
@@ -522,8 +534,12 @@ fn diagnose_running_app_default_preset_cn_route() {
         let new_lines = &lines[pre..];
         let mut detour: Option<Tag> = None;
         for line in new_lines {
-            let Some(idx) = line.find("taking detour [") else { continue };
-            if !line.contains(host) { continue; }
+            let Some(idx) = line.find("taking detour [") else {
+                continue;
+            };
+            if !line.contains(host) {
+                continue;
+            }
             let after = &line[idx + "taking detour [".len()..];
             if let Some(end) = after.find(']') {
                 if let Some(t) = Tag::parse(&after[..end]) {
@@ -540,7 +556,12 @@ fn diagnose_running_app_default_preset_cn_route() {
         );
         // Print only routing-relevant log lines.
         for line in new_lines.iter().take(50) {
-            if line.contains(host) && (line.contains("detour") || line.contains("freedom") || line.contains("dialing") || line.contains("DNS")) {
+            if line.contains(host)
+                && (line.contains("detour")
+                    || line.contains("freedom")
+                    || line.contains("dialing")
+                    || line.contains("DNS"))
+            {
                 println!("    {line}");
             }
         }
@@ -558,8 +579,8 @@ fn global_kill_switch_overrides_rules_conf_cn_direct() {
     let xray = PathBuf::from(REAL_XRAY);
     assert!(xray.exists(), "real xray missing at {}", xray.display());
 
-    let rules_text = std::fs::read_to_string(RULES_CONF)
-        .unwrap_or_else(|e| panic!("read rules.conf: {e}"));
+    let rules_text =
+        std::fs::read_to_string(RULES_CONF).unwrap_or_else(|e| panic!("read rules.conf: {e}"));
     let conf = rules_conf::parse(&rules_text);
     let translated = rules_conf::translate(&conf);
     let extra_rules = translated.rules;
@@ -611,9 +632,11 @@ fn global_kill_switch_overrides_rules_conf_cn_direct() {
         }
     });
     let stderr = child.stderr.take().expect("stderr");
-    thread::spawn(move || {
-        for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
-    });
+    thread::spawn(
+        move || {
+            for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
+        },
+    );
 
     // Wait for SOCKS port to come up.
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -664,8 +687,12 @@ fn global_kill_switch_overrides_rules_conf_cn_direct() {
         let new_lines = &lines[pre..];
         let mut detour: Option<Tag> = None;
         for line in new_lines {
-            let Some(idx) = line.find("taking detour [") else { continue };
-            if !line.contains(host) { continue; }
+            let Some(idx) = line.find("taking detour [") else {
+                continue;
+            };
+            if !line.contains(host) {
+                continue;
+            }
             let after = &line[idx + "taking detour [".len()..];
             if let Some(end) = after.find(']') {
                 if let Some(t) = Tag::parse(&after[..end]) {
@@ -675,7 +702,9 @@ fn global_kill_switch_overrides_rules_conf_cn_direct() {
             }
         }
         let ok = detour == Some(*expect);
-        if !ok { all_ok = false; }
+        if !ok {
+            all_ok = false;
+        }
         println!(
             "  [{}] {} → expected {:?}, got {:?}",
             if ok { "OK" } else { "FAIL" },

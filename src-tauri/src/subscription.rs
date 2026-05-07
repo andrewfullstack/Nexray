@@ -11,12 +11,10 @@
 //! ISP sees a small TCP connect to the server. Acceptable trade-off for
 //! "smart select"; document if anyone asks.
 
-use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nexray_core::{
-    classify_subscription, summarize_skipped, AddSubscriptionRequest, PoolEntry, Profile,
-    Subscription,
+    classify_subscription, summarize_skipped, AddSubscriptionRequest, Profile, Subscription,
 };
 use thiserror::Error;
 use tokio::net::TcpStream;
@@ -53,9 +51,7 @@ pub enum FetchError {
 /// header first; some misconfigured servers send `text/plain` or no
 /// content-type at all, so we also peek at the first bytes of the body.
 fn looks_like_html(content_type: &str, body: &str) -> bool {
-    if content_type.contains("text/html")
-        || content_type.contains("application/xhtml")
-    {
+    if content_type.contains("text/html") || content_type.contains("application/xhtml") {
         return true;
     }
     let head = body.trim_start();
@@ -203,29 +199,6 @@ pub fn validate_add(req: &AddSubscriptionRequest) -> Result<(), FetchError> {
     Ok(())
 }
 
-/// Build a flat pool view across all subscriptions, joining the latest probe
-/// data. Pure: takes references to the in-memory state.
-pub fn build_pool(
-    subs: &HashMap<String, Subscription>,
-    probes: &HashMap<String, ProbeRecord>,
-) -> Vec<PoolEntry> {
-    let mut out = Vec::new();
-    for sub in subs.values() {
-        for profile in &sub.profiles {
-            let id = profile_id(profile);
-            let probe = probes.get(id);
-            out.push(PoolEntry {
-                subscription_id: sub.id.clone(),
-                subscription_name: sub.name.clone(),
-                profile: profile.clone(),
-                latency_ms: probe.and_then(|p| p.latency_ms),
-                last_probe_ms: probe.and_then(|p| p.last_probe_ms),
-            });
-        }
-    }
-    out
-}
-
 /// Tracker for `is_due_for_refresh(now, last, interval)`. Pure helper so the
 /// scheduler can be unit-tested without sleeping.
 pub fn is_due(now_ms: u64, last_fetched_ms: Option<u64>, interval: Duration) -> bool {
@@ -305,7 +278,10 @@ mod tests {
         assert!(looks_like_html("", "  \n\t<HTML>"));
 
         // SPA / framework HTML.
-        assert!(looks_like_html("text/html", "<html><body>hello</body></html>"));
+        assert!(looks_like_html(
+            "text/html",
+            "<html><body>hello</body></html>"
+        ));
 
         // Real subscription bodies must NOT match. Plain vless://, base64,
         // and an empty body all pass through.

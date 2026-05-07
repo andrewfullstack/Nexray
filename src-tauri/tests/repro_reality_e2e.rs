@@ -26,9 +26,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use nexray_core::xray_config::{default_routing_settings, materialize, XrayConfigOptions};
-use nexray_core::{
-    decode_share_link, DecodeResult, Profile, RoutingPreset, RoutingSettings,
-};
+use nexray_core::{decode_share_link, DecodeResult, Profile, RoutingPreset, RoutingSettings};
 
 const REAL_XRAY: &str =
     "/Users/yangqi/Documents/github/nexray/src-tauri/binaries/Xray-macos-arm64-v8a/xray";
@@ -66,9 +64,9 @@ fn pick_loopback_port() -> u16 {
 fn parse_share_link(raw: &str) -> Profile {
     match decode_share_link(raw) {
         DecodeResult::Ok { profile } => profile,
-        DecodeResult::Err { reason, raw } => panic!(
-            "decode_share_link rejected the test fixture (reason={reason:?}, raw={raw})"
-        ),
+        DecodeResult::Err { reason, raw } => {
+            panic!("decode_share_link rejected the test fixture (reason={reason:?}, raw={raw})")
+        }
     }
 }
 
@@ -93,6 +91,7 @@ fn step1_share_link_decodes_to_reality_profile() {
 }
 
 #[test]
+#[ignore] // Needs the xray binary installed at REAL_XRAY; skip on CI.
 fn step2_config_materializes_and_xray_accepts_it() {
     let profile = parse_share_link(PLACEHOLDER_SHARE_LINK);
     let socks_port = pick_loopback_port();
@@ -180,9 +179,11 @@ fn step3_reality_tunnel_establishes_and_traffic_egresses_via_server() {
         }
     });
     let stderr = child.stderr.take().unwrap();
-    thread::spawn(move || {
-        for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
-    });
+    thread::spawn(
+        move || {
+            for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
+        },
+    );
 
     // Wait for SOCKS bind.
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -246,7 +247,10 @@ fn step3_reality_tunnel_establishes_and_traffic_egresses_via_server() {
         .iter()
         .filter(|l| l.contains(&server_ip) && l.contains("443"))
         .collect();
-    println!("  ✓ {} xray log line(s) reference the upstream {server_ip}:443", upstream_evidence.len());
+    println!(
+        "  ✓ {} xray log line(s) reference the upstream {server_ip}:443",
+        upstream_evidence.len()
+    );
     for line in upstream_evidence.iter().take(3) {
         println!("      {line}");
     }
@@ -264,7 +268,11 @@ fn step4_all_three_presets_route_through_reality_upstream() {
     let link = share_link();
     let profile = parse_share_link(&link);
 
-    for preset in [RoutingPreset::Default, RoutingPreset::Direct, RoutingPreset::Global] {
+    for preset in [
+        RoutingPreset::Default,
+        RoutingPreset::Direct,
+        RoutingPreset::Global,
+    ] {
         let label = match preset {
             RoutingPreset::Default => "default",
             RoutingPreset::Direct => "direct",
@@ -334,8 +342,8 @@ fn step4_all_three_presets_route_through_reality_upstream() {
         let proxy = format!("socks5h://127.0.0.1:{socks_port}");
         let ip = run_curl(Some(&proxy), "https://ifconfig.me/ip");
         let expected = match preset {
-            RoutingPreset::Direct => None,             // any non-server IP
-            _ => Some(server_ip.as_str()),             // proxy → server
+            RoutingPreset::Direct => None, // any non-server IP
+            _ => Some(server_ip.as_str()), // proxy → server
         };
         match expected {
             Some(want) => {
@@ -366,11 +374,7 @@ fn step4_all_three_presets_route_through_reality_upstream() {
 }
 
 fn run_curl(proxy: Option<&str>, url: &str) -> String {
-    let mut args: Vec<String> = vec![
-        "--max-time".into(),
-        "10".into(),
-        "--silent".into(),
-    ];
+    let mut args: Vec<String> = vec!["--max-time".into(), "10".into(), "--silent".into()];
     if let Some(p) = proxy {
         args.push("--proxy".into());
         args.push(p.into());
