@@ -7,6 +7,8 @@ use std::sync::Mutex;
 use nexray_core::xray_config::default_routing_settings;
 use nexray_core::{AppSettings, RoutingSettings, Subscription};
 
+use nexray_core::Profile;
+
 use crate::core::XraySidecar;
 use crate::subscription::ProbeRecord;
 
@@ -14,6 +16,12 @@ pub struct AppState {
     /// Lazily constructed once we resolve the bundled xray-core binary path.
     /// `None` until the first `connect` call.
     pub sidecar: Mutex<Option<XraySidecar>>,
+    /// The profile currently fed to the sidecar. Set by `connect`, cleared
+    /// by `disconnect`. Used by `tun_enable` to learn the proxy server's
+    /// address so we can install bypass routes; the connect path doesn't
+    /// always go through `subscriptions` (paste-link is direct), so we
+    /// can't recover this from there.
+    pub active_profile: Mutex<Option<Profile>>,
     /// Active subscriptions keyed by `Subscription::id`. Persisted via
     /// `tauri-plugin-store` under `subscriptions.json`.
     pub subscriptions: Mutex<HashMap<String, Subscription>>,
@@ -36,6 +44,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             sidecar: Mutex::new(None),
+            active_profile: Mutex::new(None),
             subscriptions: Mutex::new(HashMap::new()),
             probes: Mutex::new(HashMap::new()),
             routing: Mutex::new(default_routing_settings()),

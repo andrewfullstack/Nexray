@@ -266,15 +266,17 @@ fn launcher_script_pidfile_and_sigfile_lifecycle() {
     let log_path = dir.join("tun.log");
     let pidfile_path = dir.join("tun.pid");
     let sigfile_path = dir.join("tun.sig");
+    let iface_file_path = dir.join("tun.iface");
 
     let script = build_launcher_script(LauncherPaths {
         log: &log_path,
         pidfile: &pidfile_path,
         sigfile: &sigfile_path,
         binary: stub_path(),
-        iface: "utun99",
+        iface: "nexray-tun-test",
         socks_addr: "127.0.0.1:10808",
         bypass_ips: &[],
+        iface_file: &iface_file_path,
     });
     std::fs::write(&script_path, script).expect("write script");
     Command::new("chmod")

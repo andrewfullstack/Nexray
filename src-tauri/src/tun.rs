@@ -164,6 +164,7 @@ impl TunSupervisor {
                 mut child,
                 pidfile,
                 log_path,
+                iface_file,
             } => {
                 // macOS path. osascript stays alive for the whole session;
                 // it presents the password prompt, runs the launcher script
@@ -240,13 +241,21 @@ impl TunSupervisor {
                 let pidfile_clone = pidfile.clone();
                 std::thread::spawn(move || tail_log(&log_clone, &pidfile_clone, inner_arc));
 
+                // Read the launcher's chosen iface (it may have iterated
+                // past our hint if the device was busy).
+                let actual_iface = std::fs::read_to_string(&iface_file)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(iface_owned);
+
                 inner.state = TunState::Active;
                 inner.launcher = Some(child);
                 inner.privileged_pid = Some(pid);
                 inner.sigfile = Some(sigfile);
                 inner.privileged_pidfile = Some(pidfile);
                 inner.log_path = Some(log_path);
-                inner.interface_name = Some(iface_owned);
+                inner.interface_name = Some(actual_iface);
                 inner.since_ms = Some(now_ms());
                 inner.last_error = None;
                 if let Some(p) = inner.pid_file.as_ref() {
@@ -412,14 +421,15 @@ impl Drop for Inner {
 enum SpawnedLauncher {
     /// Unprivileged or non-macOS: `Child` is tun2socks itself.
     Direct(Child),
-    /// macOS-with-elevation: `Child` is osascript (which will exit shortly
-    /// after auth completes; the launcher script then runs detached as
-    /// root).
+    /// macOS-with-elevation: `Child` is osascript, kept alive for the full
+    /// session. The launcher writes the actually-chosen iface name to
+    /// `iface_file` (in case the hint we passed was busy and it iterated).
     #[cfg(target_os = "macos")]
     Osascript {
         child: Child,
         pidfile: PathBuf,
         log_path: PathBuf,
+        iface_file: PathBuf,
     },
 }
 
@@ -489,6 +499,7 @@ fn spawn_via_osascript(
     let script_path = tmp.join(format!("nexray-tun-launcher-{nonce}.sh"));
     let log_path = tmp.join(format!("nexray-tun-{nonce}.log"));
     let pidfile_path = tmp.join(format!("nexray-tun-{nonce}.pid"));
+    let iface_file = tmp.join(format!("nexray-tun-{nonce}.iface"));
     let script = build_launcher_script(LauncherPaths {
         log: &log_path,
         pidfile: &pidfile_path,
@@ -497,6 +508,7 @@ fn spawn_via_osascript(
         iface,
         socks_addr,
         bypass_ips,
+        iface_file: &iface_file,
     });
     std::fs::write(&script_path, script)?;
     use std::os::unix::fs::PermissionsExt;
@@ -525,6 +537,7 @@ fn spawn_via_osascript(
         child,
         pidfile: pidfile_path,
         log_path,
+        iface_file,
     })
 }
 
@@ -536,6 +549,9 @@ pub struct LauncherPaths<'a> {
     pub pidfile: &'a Path,
     pub sigfile: &'a Path,
     pub binary: &'a Path,
+    /// Hint at which utun number to start from. The launcher will iterate
+    /// upward to find a free one if this is busy. Pass an arbitrary string
+    /// like "nexray-tun" on Linux/Windows where iteration isn't applied.
     pub iface: &'a str,
     pub socks_addr: &'a str,
     /// IPv4 addresses (one per line acceptable) that must reach the network
@@ -543,6 +559,11 @@ pub struct LauncherPaths<'a> {
     /// Typically the proxy server's own IP — without this, xray's upstream
     /// connection to the VPS would loop back through tun2socks.
     pub bypass_ips: &'a [String],
+    /// Path the launcher writes the actually-chosen iface name to (only
+    /// meaningful on macOS where we iterate utun numbers). Supervisor
+    /// reads this after the pidfile appears so `interface_name` reflects
+    /// reality, not the hint we passed in.
+    pub iface_file: &'a Path,
 }
 
 /// Generate the bash launcher script that the privileged osascript shell
@@ -570,14 +591,35 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          LOG={log:?}\n\
          PIDFILE={pid:?}\n\
          SIGFILE={sig:?}\n\
+         IFACE_FILE={iface_file:?}\n\
          BIN={bin:?}\n\
-         IFACE={iface:?}\n\
+         IFACE_HINT={iface:?}\n\
          PROXY=\"socks5://{socks}\"\n\
          BYPASS_IPS=\"{bypass}\"\n\
          TUN_IP=\"198.18.0.1\"\n\
          \n\
          : > \"$LOG\"\n\
          chmod 644 \"$LOG\"\n\
+         \n\
+         # Find a free utun device. macOS leaks utun allocations between\n\
+         # sessions sometimes — the kernel reports \"resource busy\" on the\n\
+         # exact device tun2socks tries to claim. Iterate from the hint up\n\
+         # to +20 and pick the first that isn't already listed.\n\
+         IFACE=\"$IFACE_HINT\"\n\
+         if [[ \"$IFACE_HINT\" == utun* ]]; then\n\
+           HINT_NUM=${{IFACE_HINT#utun}}\n\
+           if [[ \"$HINT_NUM\" =~ ^[0-9]+$ ]]; then\n\
+             for OFFSET in $(seq 0 20); do\n\
+               CAND=\"utun$((HINT_NUM + OFFSET))\"\n\
+               if ! /sbin/ifconfig \"$CAND\" >/dev/null 2>&1; then\n\
+                 IFACE=\"$CAND\"\n\
+                 break\n\
+               fi\n\
+             done\n\
+           fi\n\
+         fi\n\
+         echo \"$IFACE\" > \"$IFACE_FILE\"\n\
+         chmod 644 \"$IFACE_FILE\"\n\
          \n\
          # Diagnostic header so we can tell post-mortem what context the\n\
          # script ran in (uid, ppid, env, whether tun2socks even ran).\n\
@@ -587,7 +629,7 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
            echo \"uid=$(id -u) gid=$(id -g) user=$(id -un)\"\n\
            echo \"pid=$$ ppid=$PPID\"\n\
            echo \"BIN=$BIN\"\n\
-           echo \"IFACE=$IFACE TUN_IP=$TUN_IP\"\n\
+           echo \"IFACE_HINT=$IFACE_HINT IFACE_PICKED=$IFACE TUN_IP=$TUN_IP\"\n\
            echo \"BYPASS_IPS=$BYPASS_IPS\"\n\
          }} >> \"$LOG\" 2>&1\n\
          \n\
@@ -663,10 +705,12 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          echo \"routing torn down\" >> \"$LOG\"\n\
          \n\
          rm -f \"$PIDFILE\"\n\
+         rm -f \"$IFACE_FILE\"\n\
          exit 0\n",
         log = p.log,
         pid = p.pidfile,
         sig = p.sigfile,
+        iface_file = p.iface_file,
         bin = p.binary,
         iface = p.iface,
         socks = p.socks_addr,
