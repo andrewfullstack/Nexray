@@ -47,6 +47,13 @@ pub async fn connect(
         }
     };
 
+    // Detect the local interface's IP so xray's `direct` outbound can be
+    // pinned to it via `sendThrough`. Without this, when TUN later captures
+    // the default route, xray's direct outbound socket would route into
+    // the tunnel and loop forever ("creating too many tcp ports" cascade).
+    // Setting sendThrough is harmless when TUN is off.
+    let local_ip = detect_local_ip();
+
     let config = materialize(
         &req.profile,
         &XrayConfigOptions {
@@ -55,6 +62,7 @@ pub async fn connect(
             log_level: "warning",
             routing,
             extra_rules,
+            direct_send_through: local_ip.clone(),
         },
     )
     .map_err(|e| e.to_string())?;
@@ -532,6 +540,26 @@ pub async fn tun_enable(state: State<'_, AppState>, app: AppHandle) -> Result<Tu
         .enable(&socks_addr, iface, &bypass_ips)
         .map_err(|e| e.to_string())?;
     Ok(supervisor.status())
+}
+
+/// Best-effort: figure out the IP the kernel would use to reach a public
+/// destination right now. Bind a UDP socket to `0.0.0.0:0`, then connect()
+/// it (no packets actually sent) and read the local address the kernel
+/// picked. Works on every platform and doesn't need root.
+///
+/// Important: call this BEFORE TUN is enabled, otherwise the answer is
+/// the utun device's IP (which is exactly what we don't want for
+/// sendThrough).
+fn detect_local_ip() -> Option<String> {
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    let ip = addr.ip();
+    if ip.is_loopback() || ip.is_unspecified() {
+        return None;
+    }
+    Some(ip.to_string())
 }
 
 /// Resolve the active profile's `address` (IP literal or hostname) to one

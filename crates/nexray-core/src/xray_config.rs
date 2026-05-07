@@ -33,6 +33,14 @@ pub struct XrayConfigOptions {
     /// `custom_rules` and the preset. Used by the Tauri shell to inject
     /// rules parsed from the user's Shadowrocket-format `rules.conf` file.
     pub extra_rules: Vec<Value>,
+    /// Optional source IP that the `direct` outbound binds to. When TUN
+    /// mode captures all default-route traffic, an unbound `direct`
+    /// outbound socket would route through the tunnel and create a loop
+    /// (`socks-in → direct → utun → tun2socks → socks-in → ...`). Binding
+    /// to the local interface's IP forces the kernel to use that
+    /// interface regardless of the routing table. Leave `None` when TUN
+    /// is off.
+    pub direct_send_through: Option<String>,
 }
 
 impl Default for XrayConfigOptions {
@@ -43,6 +51,7 @@ impl Default for XrayConfigOptions {
             log_level: "warning",
             routing: default_routing_settings(),
             extra_rules: vec![],
+            direct_send_through: None,
         }
     }
 }
@@ -87,9 +96,26 @@ pub fn materialize(profile: &Profile, opts: &XrayConfigOptions) -> Result<Value,
         "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
     })];
 
+    let direct_outbound = if let Some(ip) = opts.direct_send_through.as_deref() {
+        // sendThrough binds the outbound socket to a specific source IP.
+        // When TUN is on this is essential: without it, xray's direct
+        // outbound dials through the kernel routing table — which now
+        // points 0.0.0.0/1 + 128.0.0.0/1 at our utun device. The traffic
+        // would loop back into tun2socks, hit socks-in again, and explode
+        // into a cascade of `creating too many tcp ports` errors.
+        json!({
+            "tag": "direct",
+            "protocol": "freedom",
+            "settings": {},
+            "sendThrough": ip,
+        })
+    } else {
+        json!({ "tag": "direct", "protocol": "freedom", "settings": {} })
+    };
+
     let mut outbounds = vec![
         outbound,
-        json!({ "tag": "direct", "protocol": "freedom", "settings": {} }),
+        direct_outbound,
         json!({ "tag": "block", "protocol": "blackhole", "settings": {} }),
     ];
 

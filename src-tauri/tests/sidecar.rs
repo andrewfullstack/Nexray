@@ -232,6 +232,7 @@ fn connect_pipeline_brings_up_socks_listener_and_disconnect_tears_it_down() {
             log_level: "warning",
             routing: default_routing_settings(),
             extra_rules: vec![],
+            direct_send_through: None,
         },
     )
     .expect("materialize");
@@ -285,6 +286,7 @@ fn connect_pipeline_recovers_from_disconnect_then_reconnect() {
                 log_level: "warning",
                 routing: default_routing_settings(),
                 extra_rules: vec![],
+                direct_send_through: None,
             },
         )
         .expect("materialize"),

@@ -61,6 +61,7 @@ fn build_config_json() -> (String, usize, usize) {
             log_level: "warning",
             routing: default_routing_settings(),
             extra_rules: translated.rules,
+            direct_send_through: None,
         },
     )
     .expect("materialize");
