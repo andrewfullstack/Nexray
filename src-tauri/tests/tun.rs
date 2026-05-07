@@ -72,7 +72,7 @@ fn enable_transitions_disabled_to_starting_then_active() {
     let sup = TunSupervisor::new(stub_path().clone());
     assert_eq!(sup.status().state, TunState::Disabled);
 
-    sup.enable("127.0.0.1:10808", "nexray-tun").expect("enable");
+    sup.enable("127.0.0.1:10808", "nexray-tun", &[]).expect("enable");
 
     assert!(wait_until(Duration::from_secs(3), || sup.status().state
         == TunState::Active));
@@ -88,10 +88,10 @@ fn enable_transitions_disabled_to_starting_then_active() {
 fn double_enable_is_rejected() {
     no_elevation();
     let sup = TunSupervisor::new(stub_path().clone());
-    sup.enable("127.0.0.1:10808", "nexray-tun").expect("enable");
+    sup.enable("127.0.0.1:10808", "nexray-tun", &[]).expect("enable");
     assert!(wait_until(Duration::from_secs(3), || sup.status().state
         == TunState::Active));
-    let err = sup.enable("127.0.0.1:10808", "nexray-tun");
+    let err = sup.enable("127.0.0.1:10808", "nexray-tun", &[]);
     assert!(err.is_err());
     let _ = sup.disable();
 }
@@ -101,7 +101,7 @@ fn missing_binary_returns_failed_state_and_error() {
     no_elevation();
     let path = PathBuf::from("/no/such/tun2socks");
     let sup = TunSupervisor::new(path.clone());
-    let err = sup.enable("127.0.0.1:10808", "nexray-tun");
+    let err = sup.enable("127.0.0.1:10808", "nexray-tun", &[]);
     assert!(err.is_err());
     let s = sup.status();
     assert_eq!(s.state, TunState::Failed);
@@ -113,7 +113,7 @@ fn drop_terminates_child() {
     no_elevation();
     {
         let sup = TunSupervisor::new(stub_path().clone());
-        sup.enable("127.0.0.1:10808", "nexray-tun").expect("enable");
+        sup.enable("127.0.0.1:10808", "nexray-tun", &[]).expect("enable");
         wait_until(Duration::from_secs(3), || {
             sup.status().state == TunState::Active
         });
@@ -143,7 +143,7 @@ fn real_tun2socks_unprivileged_fails_with_annotated_error() {
     }
 
     let sup = TunSupervisor::new(candidate);
-    sup.enable("127.0.0.1:10808", "utun8").expect("enable");
+    sup.enable("127.0.0.1:10808", "utun8", &[]).expect("enable");
 
     assert!(
         wait_until(Duration::from_secs(5), || sup.status().state == TunState::Failed),
@@ -195,7 +195,7 @@ fn first_error_line_is_sticky_in_last_error() {
         .expect("chmod");
 
     let sup = TunSupervisor::new(script.clone());
-    sup.enable("127.0.0.1:10808", "nexray-tun").expect("enable");
+    sup.enable("127.0.0.1:10808", "nexray-tun", &[]).expect("enable");
 
     // Wait for the child to exit and the next status() poll to flip to Failed.
     assert!(wait_until(Duration::from_secs(3), || sup.status().state
@@ -223,7 +223,7 @@ fn first_error_line_is_sticky_in_last_error() {
 fn cloning_supervisor_does_not_disable_running_child() {
     no_elevation();
     let sup = TunSupervisor::new(stub_path().clone());
-    sup.enable("127.0.0.1:10808", "nexray-tun").expect("enable");
+    sup.enable("127.0.0.1:10808", "nexray-tun", &[]).expect("enable");
     assert!(wait_until(Duration::from_secs(3), || sup.status().state
         == TunState::Active));
 
@@ -274,6 +274,7 @@ fn launcher_script_pidfile_and_sigfile_lifecycle() {
         binary: stub_path(),
         iface: "utun99",
         socks_addr: "127.0.0.1:10808",
+        bypass_ips: &[],
     });
     std::fs::write(&script_path, script).expect("write script");
     Command::new("chmod")

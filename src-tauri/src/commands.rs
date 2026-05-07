@@ -510,20 +510,61 @@ pub async fn tun_enable(state: State<'_, AppState>, app: AppHandle) -> Result<Tu
         return Err("SOCKS inbound port not yet known".into());
     };
 
+    // Resolve the active profile's address(es) so the launcher can install
+    // /32 bypass routes — without those, xray's upstream connection would
+    // route into the tunnel and loop.
+    let bypass_ips = resolve_active_profile_ips(&state, conn.profile_id.as_deref())?;
+
     let supervisor = ensure_tun(&state, &app)?;
     let socks_addr = format!("127.0.0.1:{socks_port}");
-    // macOS utun devices must follow the `utunN` naming convention; Linux/
-    // Windows accept arbitrary names but `utun8` works there too. Pick a
-    // high index to dodge collisions with system VPN clients.
     let iface = if cfg!(target_os = "macos") {
         "utun8"
     } else {
         "nexray-tun"
     };
     supervisor
-        .enable(&socks_addr, iface)
+        .enable(&socks_addr, iface, &bypass_ips)
         .map_err(|e| e.to_string())?;
     Ok(supervisor.status())
+}
+
+/// Look up the connected profile in the subscriptions store and resolve its
+/// `address` (which may be an IP literal or a hostname) to one or more
+/// IPv4/IPv6 addresses. Returns an empty Vec if we can't determine the
+/// active profile or DNS fails — in that case the launcher skips bypass
+/// route installation and the user's xray upstream may loop. We don't fail
+/// hard on this because TUN bring-up is still useful for diagnosis.
+fn resolve_active_profile_ips(
+    state: &State<'_, AppState>,
+    profile_id: Option<&str>,
+) -> Result<Vec<String>, String> {
+    use std::net::ToSocketAddrs;
+    let Some(profile_id) = profile_id else {
+        return Ok(vec![]);
+    };
+    let address = {
+        let subs = state.subscriptions.lock().map_err(|e| e.to_string())?;
+        subs.values()
+            .flat_map(|s| s.profiles.iter())
+            .find(|p| match p {
+                Profile::CdnWs(c) => c.id == profile_id,
+                Profile::Reality(r) => r.id == profile_id,
+            })
+            .map(|p| match p {
+                Profile::CdnWs(c) => c.address.clone(),
+                Profile::Reality(r) => r.address.clone(),
+            })
+    };
+    let Some(address) = address else {
+        return Ok(vec![]);
+    };
+    // ToSocketAddrs needs host:port. Port doesn't matter for resolution.
+    let target = format!("{address}:443");
+    let ips: Vec<String> = target
+        .to_socket_addrs()
+        .map(|iter| iter.map(|sa| sa.ip().to_string()).collect())
+        .unwrap_or_default();
+    Ok(ips)
 }
 
 #[tauri::command]

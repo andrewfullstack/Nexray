@@ -112,7 +112,12 @@ impl TunSupervisor {
     /// Enable TUN by spawning tun2socks pointed at `socks_addr` (e.g.
     /// `127.0.0.1:10808`). On macOS this triggers the admin password
     /// prompt; the call returns once the user authorizes (or cancels).
-    pub fn enable(&self, socks_addr: &str, iface_name: &str) -> Result<TunStatus, TunError> {
+    pub fn enable(
+        &self,
+        socks_addr: &str,
+        iface_name: &str,
+        bypass_ips: &[String],
+    ) -> Result<TunStatus, TunError> {
         let mut inner = lock(&self.inner);
         if matches!(inner.state, TunState::Starting | TunState::Active) {
             return Err(TunError::AlreadyActive);
@@ -130,7 +135,7 @@ impl TunSupervisor {
         let sigfile = make_sigfile_path();
         let iface_owned = iface_name.to_string();
 
-        let strategy = spawn_strategy(&binary, iface_name, socks_addr, &sigfile)
+        let strategy = spawn_strategy(&binary, iface_name, socks_addr, &sigfile, bypass_ips)
             .map_err(TunError::Spawn)?;
 
         match strategy {
@@ -423,6 +428,7 @@ fn spawn_strategy(
     iface: &str,
     socks_addr: &str,
     sigfile: &Path,
+    bypass_ips: &[String],
 ) -> std::io::Result<SpawnedLauncher> {
     if std::env::var_os("NEXRAY_TUN_NO_ELEVATION").is_some() {
         return spawn_unprivileged(binary, iface, socks_addr).map(SpawnedLauncher::Direct);
@@ -430,11 +436,12 @@ fn spawn_strategy(
 
     #[cfg(target_os = "macos")]
     {
-        spawn_via_osascript(binary, iface, socks_addr, sigfile)
+        spawn_via_osascript(binary, iface, socks_addr, sigfile, bypass_ips)
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = sigfile; // unused outside macOS
+        let _ = bypass_ips;
         spawn_unprivileged(binary, iface, socks_addr).map(SpawnedLauncher::Direct)
     }
 }
@@ -475,6 +482,7 @@ fn spawn_via_osascript(
     iface: &str,
     socks_addr: &str,
     sigfile: &Path,
+    bypass_ips: &[String],
 ) -> std::io::Result<SpawnedLauncher> {
     let nonce = now_ms();
     let tmp = std::env::temp_dir();
@@ -488,6 +496,7 @@ fn spawn_via_osascript(
         binary,
         iface,
         socks_addr,
+        bypass_ips,
     });
     std::fs::write(&script_path, script)?;
     use std::os::unix::fs::PermissionsExt;
@@ -529,14 +538,32 @@ pub struct LauncherPaths<'a> {
     pub binary: &'a Path,
     pub iface: &'a str,
     pub socks_addr: &'a str,
+    /// IPv4 addresses (one per line acceptable) that must reach the network
+    /// via the *original* default gateway rather than through the tunnel.
+    /// Typically the proxy server's own IP — without this, xray's upstream
+    /// connection to the VPS would loop back through tun2socks.
+    pub bypass_ips: &'a [String],
 }
 
 /// Generate the bash launcher script that the privileged osascript shell
 /// execs. Extracted so tests can run it directly (without osascript) and
 /// verify the FSM contracts: writes pidfile, drains stderr to log, removes
-/// pidfile on exit, honours the sigfile for cooperative shutdown.
+/// pidfile on exit, honours the sigfile for cooperative shutdown, and
+/// brings up routing so packets actually flow through the tunnel.
 #[doc(hidden)]
 pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
+    // Bypass IPs become a space-separated list embedded in the script.
+    // We trust the supervisor to have validated these (they came out of
+    // a DNS lookup of the active profile's address). Filter to safe chars
+    // defensively anyway.
+    let bypass_list = p
+        .bypass_ips
+        .iter()
+        .filter(|ip| ip.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == ':'))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+
     format!(
         "#!/bin/bash\n\
          set -u\n\
@@ -546,6 +573,8 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          BIN={bin:?}\n\
          IFACE={iface:?}\n\
          PROXY=\"socks5://{socks}\"\n\
+         BYPASS_IPS=\"{bypass}\"\n\
+         TUN_IP=\"198.18.0.1\"\n\
          \n\
          : > \"$LOG\"\n\
          chmod 644 \"$LOG\"\n\
@@ -558,19 +587,51 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
            echo \"uid=$(id -u) gid=$(id -g) user=$(id -un)\"\n\
            echo \"pid=$$ ppid=$PPID\"\n\
            echo \"BIN=$BIN\"\n\
-           echo \"BIN exists: $([ -f \"$BIN\" ] && echo yes || echo no)\"\n\
-           echo \"BIN executable: $([ -x \"$BIN\" ] && echo yes || echo no)\"\n\
-           echo \"--- tun2socks output below ---\"\n\
+           echo \"IFACE=$IFACE TUN_IP=$TUN_IP\"\n\
+           echo \"BYPASS_IPS=$BYPASS_IPS\"\n\
          }} >> \"$LOG\" 2>&1\n\
          \n\
-         # Background tun2socks; stderr/stdout both → LOG so a post-mortem\n\
-         # has everything in one place.\n\
+         # Look up the original default gateway/interface BEFORE we touch\n\
+         # routes. We need both for /32 bypass routes (per-host via gw) and\n\
+         # to restore on teardown. If empty, skip bypass setup; routing\n\
+         # will still install but xray's upstream connection may loop.\n\
+         LOCAL_GW=$(/sbin/route -n get default 2>/dev/null | awk '/gateway:/ {{print $2}}')\n\
+         LOCAL_IF=$(/sbin/route -n get default 2>/dev/null | awk '/interface:/ {{print $2}}')\n\
+         echo \"LOCAL_GW=$LOCAL_GW LOCAL_IF=$LOCAL_IF\" >> \"$LOG\"\n\
+         echo \"--- tun2socks output below ---\" >> \"$LOG\"\n\
+         \n\
+         # Background tun2socks; stderr/stdout both → LOG.\n\
          \"$BIN\" -device \"$IFACE\" -proxy \"$PROXY\" -loglevel warn \\\n\
            >>\"$LOG\" 2>&1 &\n\
          TUN_PID=$!\n\
          echo \"$TUN_PID\" > \"$PIDFILE\"\n\
          chmod 644 \"$PIDFILE\"\n\
          echo \"tun2socks spawned with pid=$TUN_PID\" >> \"$LOG\"\n\
+         \n\
+         # Give tun2socks ~500ms to actually create the utun device.\n\
+         sleep 0.5\n\
+         \n\
+         # Configure utun's IPv4 address (point-to-point, /32).\n\
+         /sbin/ifconfig \"$IFACE\" \"$TUN_IP\" \"$TUN_IP\" up >> \"$LOG\" 2>&1 \\\n\
+           && echo \"ifconfig $IFACE up at $TUN_IP\" >> \"$LOG\"\n\
+         \n\
+         # Bypass /32 routes: each proxy IP must reach the internet via the\n\
+         # ORIGINAL default gateway, otherwise xray's upstream connection\n\
+         # to it would route back into the tunnel and loop forever.\n\
+         if [ -n \"$LOCAL_GW\" ]; then\n\
+           for IP in $BYPASS_IPS; do\n\
+             /sbin/route -n add -host \"$IP\" \"$LOCAL_GW\" >> \"$LOG\" 2>&1 \\\n\
+               && echo \"bypass: $IP -> $LOCAL_GW\" >> \"$LOG\"\n\
+           done\n\
+         fi\n\
+         \n\
+         # Split-default trick: 0.0.0.0/1 + 128.0.0.0/1 covers all of\n\
+         # 0.0.0.0/0 but is more specific than the existing default route,\n\
+         # so it wins. Lets us point everything at utun without having to\n\
+         # `route change default` (which is hard to roll back cleanly).\n\
+         /sbin/route -n add -net 0.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         /sbin/route -n add -net 128.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         echo \"split-default routes installed via $IFACE\" >> \"$LOG\"\n\
          \n\
          # Cooperative shutdown loop. Polls every 0.3s.\n\
          while kill -0 \"$TUN_PID\" 2>/dev/null; do\n\
@@ -585,15 +646,22 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
            sleep 0.3\n\
          done\n\
          \n\
-         # Reap the child so we can record its exit status before removing\n\
-         # the pidfile. `wait` may fail if the child already reaped; that's\n\
-         # fine, just keeps the diagnostic line consistent.\n\
          wait \"$TUN_PID\" 2>/dev/null\n\
          echo \"tun2socks exited with status $?\" >> \"$LOG\"\n\
          \n\
-         # Final marker: removing the pidfile signals the supervisor that\n\
-         # the privileged process has exited cleanly. Leave the log file so\n\
-         # any FATAL line and our diagnostic header are still readable.\n\
+         # Tear down routes and addresses. We added these; we own removing\n\
+         # them. Errors swallowed because some entries may have failed to\n\
+         # install or already been removed.\n\
+         /sbin/route -n delete -net 0.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         /sbin/route -n delete -net 128.0.0.0/1 -interface \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         if [ -n \"$LOCAL_GW\" ]; then\n\
+           for IP in $BYPASS_IPS; do\n\
+             /sbin/route -n delete -host \"$IP\" \"$LOCAL_GW\" >> \"$LOG\" 2>&1 || true\n\
+           done\n\
+         fi\n\
+         /sbin/ifconfig \"$IFACE\" down >> \"$LOG\" 2>&1 || true\n\
+         echo \"routing torn down\" >> \"$LOG\"\n\
+         \n\
          rm -f \"$PIDFILE\"\n\
          exit 0\n",
         log = p.log,
@@ -602,6 +670,7 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
         bin = p.binary,
         iface = p.iface,
         socks = p.socks_addr,
+        bypass = bypass_list,
     )
 }
 
