@@ -371,9 +371,29 @@ fn wait_for_path_gone(path: &Path, timeout: std::time::Duration) {
     }
 }
 
-impl Drop for TunSupervisor {
+/// Drop is on `Inner`, NOT on `TunSupervisor`. The supervisor is cloned
+/// every time it leaves an IPC handler (`pub struct TunSupervisor { inner:
+/// Arc<Mutex<Inner>> }`); putting Drop on the wrapper means *every* clone
+/// triggers teardown when it goes out of scope, which catastrophically
+/// SIGTERMs the freshly-spawned tun2socks the moment `enable()` returns.
+/// Putting it on `Inner` means cleanup runs exactly once — when the last
+/// Arc reference is gone (typically app shutdown).
+impl Drop for Inner {
     fn drop(&mut self) {
-        let _ = self.disable();
+        // Touch the sigfile so the launcher loop (still running as root)
+        // notices and SIGTERMs tun2socks. Best-effort.
+        if let Some(sf) = &self.sigfile {
+            let _ = std::fs::write(sf, b"stop");
+        }
+        // If we still own a Child handle (Linux/Windows direct path, or
+        // macOS-osascript that hasn't exited yet), kill it.
+        if let Some(child) = &mut self.launcher {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if let Some(p) = &self.pid_file {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }
 

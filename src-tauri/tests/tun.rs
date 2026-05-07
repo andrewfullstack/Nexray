@@ -214,6 +214,38 @@ fn first_error_line_is_sticky_in_last_error() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Cloning the supervisor must not call `disable()`. The supervisor is
+/// `Clone` so it can be returned from each IPC handler, and every IPC
+/// handler drops its clone on return — if Drop is on the wrapper instead
+/// of the inner Arc, every IPC call after enable() teardown the freshly-
+/// spawned tun2socks. Caught the hard way live on macOS.
+#[test]
+fn cloning_supervisor_does_not_disable_running_child() {
+    no_elevation();
+    let sup = TunSupervisor::new(stub_path().clone());
+    sup.enable("127.0.0.1:10808", "nexray-tun").expect("enable");
+    assert!(wait_until(Duration::from_secs(3), || sup.status().state
+        == TunState::Active));
+
+    // Clone-and-drop a few times — IPC pattern.
+    for _ in 0..3 {
+        let clone = sup.clone();
+        drop(clone);
+    }
+
+    // Original supervisor's child should still be Active.
+    sleep(Duration::from_millis(200));
+    let s = sup.status();
+    assert_eq!(
+        s.state,
+        TunState::Active,
+        "clone-drop tore down the child; last_error={:?}",
+        s.last_error
+    );
+
+    sup.disable().expect("disable");
+}
+
 /// Run the macOS launcher bash script directly (no osascript / no root) using
 /// the long-running xray-stub as a stand-in for tun2socks. This validates the
 /// detached-launcher contract: writes pidfile, runs binary, sigfile teardown
