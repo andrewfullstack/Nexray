@@ -156,51 +156,76 @@ impl TunSupervisor {
             }
             #[cfg(target_os = "macos")]
             SpawnedLauncher::Osascript {
-                child,
+                mut child,
                 pidfile,
                 log_path,
             } => {
-                // macOS path. osascript will exit (≤30s) after the user
-                // authorizes; the privileged launcher then runs detached.
-                // Wait for osascript to return so we can detect auth-cancel
-                // synchronously, then poll the pidfile to learn the
-                // privileged tun2socks PID.
-                let output = child
-                    .wait_with_output()
-                    .map_err(|e| TunError::Spawn(std::io::Error::other(format!(
-                        "osascript wait failed: {e}"
-                    ))))?;
-                if !output.status.success() {
-                    // The most common case is "User cancelled." in stderr.
-                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    let msg = if stderr.is_empty() {
-                        format!(
-                            "admin authorization failed (osascript exit {:?})",
-                            output.status.code()
-                        )
-                    } else {
-                        format!("admin authorization failed: {stderr}")
-                    };
-                    inner.state = TunState::Failed;
-                    inner.last_error = Some(msg.clone());
-                    // Best-effort cleanup of the launcher script we wrote.
-                    let _ = std::fs::remove_file(&pidfile);
-                    return Err(TunError::Spawn(std::io::Error::other(msg)));
-                }
+                // macOS path. osascript stays alive for the whole session;
+                // it presents the password prompt, runs the launcher script
+                // as root, and only exits when the launcher exits (which
+                // happens via sigfile teardown). We poll the pidfile to
+                // learn when tun2socks is up.
+                //
+                // Race window: osascript may fail (user cancelled) before
+                // the pidfile appears. So we interleave try_wait() with
+                // pidfile polling, with a generous timeout to account for
+                // the human typing their password.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                let pid_result = loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            // osascript already exited — pidfile may or
+                            // may not exist. If it does, we caught it after
+                            // a fast tun2socks crash; surface the log.
+                            break Err(format!(
+                                "osascript exited before pidfile appeared: {status}"
+                            ));
+                        }
+                        Ok(None) => {}
+                        Err(e) => break Err(format!("try_wait failed: {e}")),
+                    }
+                    if let Ok(s) = std::fs::read_to_string(&pidfile) {
+                        if let Ok(pid) = s.trim().parse::<u32>() {
+                            break Ok(pid);
+                        }
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        break Err(
+                            "timed out waiting for launcher pidfile (60s) — admin \
+                             prompt not answered or launcher script never ran"
+                                .into(),
+                        );
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                };
 
-                // Auth succeeded. Poll for the pidfile (launcher writes it
-                // after backgrounding tun2socks). Up to ~5s.
-                let pid = wait_for_pidfile(&pidfile, std::time::Duration::from_secs(5));
-                let Some(pid) = pid else {
-                    inner.state = TunState::Failed;
-                    inner.last_error = Some(
-                        "admin auth ok but launcher never wrote pidfile — \
-                         check /tmp for nexray-tun-* files"
-                            .into(),
-                    );
-                    return Err(TunError::Spawn(std::io::Error::other(
-                        "launcher pidfile missing",
-                    )));
+                let pid = match pid_result {
+                    Ok(pid) => pid,
+                    Err(why) => {
+                        // Best-effort: kill osascript so it doesn't hang
+                        // around if the prompt was still up.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        // Surface the launcher log if it exists — that's
+                        // where tun2socks's FATAL lines went.
+                        let log_excerpt = std::fs::read_to_string(&log_path)
+                            .ok()
+                            .map(|s| {
+                                s.lines()
+                                    .rev()
+                                    .take(8)
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                    .rev()
+                                    .collect::<Vec<_>>()
+                                    .join(" | ")
+                            })
+                            .unwrap_or_else(|| "no log file".into());
+                        let msg = format!("{why}; launcher log tail: {log_excerpt}");
+                        inner.state = TunState::Failed;
+                        inner.last_error = Some(msg.clone());
+                        return Err(TunError::Spawn(std::io::Error::other(msg)));
+                    }
                 };
 
                 // Spawn the log tailer so live FATAL lines flow into
@@ -211,7 +236,7 @@ impl TunSupervisor {
                 std::thread::spawn(move || tail_log(&log_clone, &pidfile_clone, inner_arc));
 
                 inner.state = TunState::Active;
-                inner.launcher = None;
+                inner.launcher = Some(child);
                 inner.privileged_pid = Some(pid);
                 inner.sigfile = Some(sigfile);
                 inner.privileged_pidfile = Some(pidfile);
@@ -411,18 +436,19 @@ fn spawn_unprivileged(binary: &Path, iface: &str, socks_addr: &str) -> std::io::
 }
 
 /// macOS-only: wrap tun2socks in `osascript do shell script ... with
-/// administrator privileges`. AppleScript buffers stdout (it does NOT
-/// stream), so we can't read live data through the osascript pipe. Instead:
+/// administrator privileges`. The inner command is the launcher script,
+/// run synchronously — osascript blocks for the full session. We keep the
+/// osascript `Child` handle alive throughout, polling the launcher's
+/// pidfile to learn the privileged tun2socks PID and tailing the log file
+/// for live error surfacing. Teardown happens by `touch`ing the sigfile —
+/// the launcher's poll loop notices, SIGTERMs tun2socks, exits, the script
+/// exits, and osascript exits. One password prompt per session.
 ///
-/// 1. The privileged inner command detaches a launcher script via
-///    `& disown` so `do shell script` returns immediately after auth.
-/// 2. The launcher (now running detached as root) backgrounds tun2socks,
-///    writes its PID to a per-session pidfile, and `tail -f`s tun2socks's
-///    stderr to a per-session log file.
-/// 3. The supervisor polls the pidfile (Active when it appears) and tails
-///    the log file (live error surfacing).
-/// 4. Teardown: supervisor `touch`es a sigfile; the launcher polls it and
-///    SIGTERMs tun2socks. No second password prompt.
+/// (Earlier iterations tried `& disown` to detach the launcher so
+/// `do shell script` could return immediately. This was unreliable: the
+/// detach interacted poorly with AppleScript's authorization context and
+/// the launcher sometimes wasn't actually privileged. Synchronous-block
+/// avoids that whole class of bug.)
 #[cfg(target_os = "macos")]
 fn spawn_via_osascript(
     binary: &Path,
@@ -449,24 +475,17 @@ fn spawn_via_osascript(
     perms.set_mode(0o755);
     std::fs::set_permissions(&script_path, perms)?;
 
-    // AppleScript: spawn the launcher detached so `do shell script` returns
-    // immediately after the user authorizes. The launcher then runs as root
-    // for the full session.
-    let detach_cmd = format!(
-        "/bin/bash -c {inner}",
-        inner = shell_single_quote(&format!(
-            "nohup /bin/bash {script} >/dev/null 2>&1 </dev/null & disown",
-            script = shell_single_quote(&script_path.to_string_lossy())
-        ))
+    // AppleScript runs the launcher synchronously. Keep the osascript Child
+    // alive — supervisor.disable() will touch the sigfile to bring it down.
+    let inner_cmd = format!(
+        "/bin/bash {script}",
+        script = shell_single_quote(&script_path.to_string_lossy())
     );
     let applescript = format!(
         "do shell script \"{cmd}\" with administrator privileges",
-        cmd = applescript_double_quote(&detach_cmd)
+        cmd = applescript_double_quote(&inner_cmd)
     );
 
-    // Spawn osascript and capture stdout — the supervisor's drain thread
-    // looks at it for the "live" PID handoff. We *also* tell it where to
-    // find the pidfile and log via env so the polling thread can do its job.
     let mut cmd = Command::new("/usr/bin/osascript");
     cmd.args(["-e", &applescript])
         .stdin(Stdio::null())
@@ -511,18 +530,33 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
          : > \"$LOG\"\n\
          chmod 644 \"$LOG\"\n\
          \n\
-         # Background tun2socks; everything → LOG so the supervisor can\n\
-         # tail it without having to parse the launcher's own output.\n\
+         # Diagnostic header so we can tell post-mortem what context the\n\
+         # script ran in (uid, ppid, env, whether tun2socks even ran).\n\
+         {{\n\
+           echo \"--- nexray-tun launcher diag ---\"\n\
+           echo \"date: $(date)\"\n\
+           echo \"uid=$(id -u) gid=$(id -g) user=$(id -un)\"\n\
+           echo \"pid=$$ ppid=$PPID\"\n\
+           echo \"BIN=$BIN\"\n\
+           echo \"BIN exists: $([ -f \"$BIN\" ] && echo yes || echo no)\"\n\
+           echo \"BIN executable: $([ -x \"$BIN\" ] && echo yes || echo no)\"\n\
+           echo \"--- tun2socks output below ---\"\n\
+         }} >> \"$LOG\" 2>&1\n\
+         \n\
+         # Background tun2socks; stderr/stdout both → LOG so a post-mortem\n\
+         # has everything in one place.\n\
          \"$BIN\" -device \"$IFACE\" -proxy \"$PROXY\" -loglevel warn \\\n\
-           >\"$LOG\" 2>&1 &\n\
+           >>\"$LOG\" 2>&1 &\n\
          TUN_PID=$!\n\
          echo \"$TUN_PID\" > \"$PIDFILE\"\n\
          chmod 644 \"$PIDFILE\"\n\
+         echo \"tun2socks spawned with pid=$TUN_PID\" >> \"$LOG\"\n\
          \n\
          # Cooperative shutdown loop. Polls every 0.3s.\n\
          while kill -0 \"$TUN_PID\" 2>/dev/null; do\n\
            if [ -e \"$SIGFILE\" ]; then\n\
              rm -f \"$SIGFILE\"\n\
+             echo \"sigfile observed, sending SIGTERM\" >> \"$LOG\"\n\
              kill -TERM \"$TUN_PID\" 2>/dev/null || true\n\
              sleep 1\n\
              kill -KILL \"$TUN_PID\" 2>/dev/null || true\n\
@@ -531,9 +565,15 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
            sleep 0.3\n\
          done\n\
          \n\
+         # Reap the child so we can record its exit status before removing\n\
+         # the pidfile. `wait` may fail if the child already reaped; that's\n\
+         # fine, just keeps the diagnostic line consistent.\n\
+         wait \"$TUN_PID\" 2>/dev/null\n\
+         echo \"tun2socks exited with status $?\" >> \"$LOG\"\n\
+         \n\
          # Final marker: removing the pidfile signals the supervisor that\n\
          # the privileged process has exited cleanly. Leave the log file so\n\
-         # any FATAL line is still readable.\n\
+         # any FATAL line and our diagnostic header are still readable.\n\
          rm -f \"$PIDFILE\"\n\
          exit 0\n",
         log = p.log,
@@ -543,22 +583,6 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
         iface = p.iface,
         socks = p.socks_addr,
     )
-}
-
-/// Poll for the launcher's pidfile to appear, parse its content. Returns
-/// the privileged tun2socks PID, or `None` on timeout.
-#[cfg(target_os = "macos")]
-fn wait_for_pidfile(path: &Path, timeout: std::time::Duration) -> Option<u32> {
-    let deadline = std::time::Instant::now() + timeout;
-    while std::time::Instant::now() < deadline {
-        if let Ok(s) = std::fs::read_to_string(path) {
-            if let Ok(pid) = s.trim().parse::<u32>() {
-                return Some(pid);
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    None
 }
 
 /// Tail the per-session log file, feeding lines through the same sticky-
