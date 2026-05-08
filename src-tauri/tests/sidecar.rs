@@ -103,19 +103,19 @@ fn external_kill_transitions_to_crashed_within_2s() {
         .state
         == ConnectionState::Connected));
 
-    // Kill the child externally. We don't have the PID handle, so spawn
-    // pkill/taskkill targeting the stub binary. Acceptable for a single-stub
-    // test (no other stub processes should be running).
+    // Kill the child externally — targeted by PID so we don't reap stubs
+    // spawned by other tests running in parallel under `cargo test`.
+    let pid = sidecar.child_pid().expect("child pid");
     #[cfg(unix)]
     {
-        let _ = std::process::Command::new("pkill")
-            .args(["-9", "-f", "xray-stub"])
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
             .status();
     }
     #[cfg(windows)]
     {
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "xray-stub.exe"])
+            .args(["/F", "/PID", &pid.to_string()])
             .status();
     }
 

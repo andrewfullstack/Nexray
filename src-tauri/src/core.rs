@@ -93,6 +93,15 @@ impl XraySidecar {
         lock(&self.inner).binary_path.clone()
     }
 
+    /// PID of the live child, if any. Returns `None` when the supervisor
+    /// is `Disconnected`/`Crashed` or before `start` has spawned anything.
+    /// Used by integration tests to target the exact child without relying
+    /// on `pkill -f` (which would also reap siblings spawned by parallel
+    /// tests sharing the same binary name).
+    pub fn child_pid(&self) -> Option<u32> {
+        lock(&self.inner).child.as_ref().map(|c| c.id())
+    }
+
     pub fn start(
         &self,
         profile_id: String,
