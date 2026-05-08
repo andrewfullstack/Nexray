@@ -45,6 +45,11 @@ const HASHES = {
     sha256: "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad",
     binary: "xray.exe",
   },
+  "aarch64-pc-windows-msvc": {
+    asset: "Xray-windows-arm64-v8a.zip",
+    sha256: "35d4ed6ec21224fb22b07c2c3f672e2350cd536f2c74d309150175a76365ea88",
+    binary: "xray.exe",
+  },
   "x86_64-unknown-linux-gnu": {
     asset: "Xray-linux-64.zip",
     sha256: "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
@@ -52,7 +57,7 @@ const HASHES = {
   },
   "aarch64-unknown-linux-gnu": {
     asset: "Xray-linux-arm64-v8a.zip",
-    sha256: "REPLACE_ME_linux_arm64",
+    sha256: "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
     binary: "xray",
   },
 };
@@ -88,6 +93,12 @@ const TUN2SOCKS = {
     extracted: "tun2socks-windows-amd64.exe",
     binary: "tun2socks.exe",
   },
+  "aarch64-pc-windows-msvc": {
+    asset: "tun2socks-windows-arm64.zip",
+    sha256: "e7c71f89991f9b850817e6b441e568c370292f8aea4fa9bdf70d099da7991eca",
+    extracted: "tun2socks-windows-arm64.exe",
+    binary: "tun2socks.exe",
+  },
   "x86_64-unknown-linux-gnu": {
     asset: "tun2socks-linux-amd64.zip",
     sha256: "2c4d9891ca898ecb2b582d158612d44c66793008328852b3465b77828c867e77",
@@ -96,7 +107,7 @@ const TUN2SOCKS = {
   },
   "aarch64-unknown-linux-gnu": {
     asset: "tun2socks-linux-arm64.zip",
-    sha256: "REPLACE_ME_tun2socks_linux_arm64",
+    sha256: "a5b326f79585851a7518b1072e1e2610d0a1ca6803b92f0630fcf97c035b5c81",
     extracted: "tun2socks-linux-arm64",
     binary: "tun2socks",
   },
