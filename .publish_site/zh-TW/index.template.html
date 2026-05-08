@@ -21,10 +21,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nexray — Modern VLESS proxy client</title>
-<meta name="description" content="A modern, minimal VLESS+REALITY / VLESS+WS+TLS proxy client for macOS, Windows, and Linux.">
-<meta property="og:title" content="Nexray — Modern VLESS proxy client">
-<meta property="og:description" content="VLESS+REALITY and VLESS+WS+TLS only. Tray-app simple, kernel-grade fast.">
+<title>Nexray — 現代 VLESS 代理客戶端</title>
+<meta name="description" content="適用於 macOS、Windows、Linux 的現代輕量 VLESS+REALITY / VLESS+WS+TLS 代理客戶端。">
+<meta property="og:title" content="Nexray — 現代 VLESS 代理客戶端">
+<meta property="og:description" content="只支援 VLESS+REALITY 與 VLESS+WS+TLS。系統列圖示般簡潔,核心級效能。">
 <meta property="og:type" content="website">
 <style>
   :root {
@@ -210,10 +210,10 @@
 </style>
 </head>
 <body>
-<nav class="lang-switcher" aria-label="Language">
-  <a href="/Nexray-App/" class="active" hreflang="en">EN</a>
+<nav class="lang-switcher" aria-label="語言">
+  <a href="/Nexray-App/" hreflang="en">EN</a>
   <a href="/Nexray-App/zh-CN/" hreflang="zh-CN">简</a>
-  <a href="/Nexray-App/zh-TW/" hreflang="zh-TW">繁</a>
+  <a href="/Nexray-App/zh-TW/" class="active" hreflang="zh-TW">繁</a>
   <a href="/Nexray-App/ru/" hreflang="ru">RU</a>
 </nav>
 
@@ -222,20 +222,20 @@
 <header>
   <div class="brand-mark">⚡ Nexray</div>
   <div class="version-pill">${VERSION}</div>
-  <h1>Modern VLESS proxy client.</h1>
-  <p class="tagline">VLESS+REALITY and VLESS+WS+TLS only. Tray-app simple, kernel-grade fast.</p>
+  <h1>現代 VLESS 代理客戶端。</h1>
+  <p class="tagline">只支援 VLESS+REALITY 與 VLESS+WS+TLS。系統列圖示般簡潔,核心級效能。</p>
   <div class="cta-row">
-    <a id="primary-cta" class="cta cta-primary" href="#downloads">Download</a>
-    <a class="cta cta-secondary" href="https://github.com/${PUBLISH_REPO}/releases">All releases</a>
+    <a id="primary-cta" class="cta cta-primary" href="#downloads">下載</a>
+    <a class="cta cta-secondary" href="https://github.com/${PUBLISH_REPO}/releases">所有版本</a>
   </div>
 </header>
 
 <section id="downloads">
-  <h2>Download</h2>
+  <h2>下載</h2>
   <div class="platform-grid">
     <div class="card" data-os="mac-arm">
       <h3>macOS</h3>
-      <div class="meta">Apple Silicon · M-series</div>
+      <div class="meta">Apple Silicon · M 系列晶片</div>
       <a class="download-link" href="${BASE}/${DMG_ARM}">${DMG_ARM}</a>
     </div>
     <div class="card" data-os="linux">
@@ -245,78 +245,75 @@
     </div>
     <div class="card" data-os="windows">
       <h3>Windows</h3>
-      <div class="meta">x86_64 · NSIS installer</div>
+      <div class="meta">x86_64 · NSIS 安裝程式</div>
       <a class="download-link" href="${BASE}/${EXE}">${EXE}</a>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>First launch</h2>
+  <h2>首次啟動</h2>
   <p style="color: var(--fg-2); font-size: 0.92rem; margin-bottom: 1rem;">
-    The current builds are unsigned. macOS will refuse to open the
-    <code style="font-family: var(--mono);">.dmg</code> on first launch and Windows SmartScreen
-    will warn before running the
-    <code style="font-family: var(--mono);">.exe</code>. Both are bypassed in seconds:
+    目前的安裝包未經程式碼簽署。macOS 首次會拒絕開啟
+    <code style="font-family: var(--mono);">.dmg</code>,Windows 也會以 SmartScreen 攔截
+    <code style="font-family: var(--mono);">.exe</code>。兩者都可以在數秒內繞過:
   </p>
   <div class="feature-grid">
     <div class="card feature">
-      <h3>macOS — clear the quarantine flag</h3>
+      <h3>macOS — 清除隔離標記</h3>
       <p>
-        After dragging <code style="font-family: var(--mono);">Nexray.app</code> into
-        <code style="font-family: var(--mono);">/Applications</code>, run this once in Terminal
-        (you'll be prompted for your password):
+        將 <code style="font-family: var(--mono);">Nexray.app</code> 拖進
+        <code style="font-family: var(--mono);">/Applications</code> 後,在終端機執行一次
+        (會提示輸入密碼):
       </p>
 <pre style="background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; font-family: var(--mono); font-size: 0.82rem; overflow-x: auto; margin-top: 0.5rem; color: var(--fg);">sudo xattr -dr com.apple.quarantine /Applications/Nexray.app</pre>
       <p style="margin-top: 0.5rem; font-size: 0.85rem;">
-        Then double-click as normal. No need to repeat after updates installed via the same path.
+        之後正常點兩下開啟即可。覆蓋更新後只要還在同一路徑,無須再次執行。
       </p>
     </div>
     <div class="card feature">
-      <h3>Windows — Run anyway</h3>
+      <h3>Windows — 仍要執行</h3>
       <p>
-        Double-click the
-        <code style="font-family: var(--mono);">.exe</code>. SmartScreen shows
-        "Windows protected your PC". Click <strong>More info</strong> →
-        <strong>Run anyway</strong>. The warning appears only on first launch
-        of each version.
+        點兩下 <code style="font-family: var(--mono);">.exe</code>,SmartScreen 會顯示
+        「Windows 已保護您的電腦」。按 <strong>其他資訊</strong> →
+        <strong>仍要執行</strong>。每個版本只在首次執行時顯示這個警告。
       </p>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>Why Nexray</h2>
+  <h2>核心特性</h2>
   <div class="feature-grid">
     <div class="card feature">
-      <h3>VLESS only</h3>
-      <p>Refuses VMess, Shadowsocks, Trojan, and every other legacy or insecure-by-default combination — by design.</p>
+      <h3>僅支援 VLESS</h3>
+      <p>拒絕 VMess、Shadowsocks、Trojan,以及任何過時或預設不安全的協定組合 — 這是設計初衷。</p>
     </div>
     <div class="card feature">
-      <h3>Subscription import</h3>
-      <p>Paste any Shadowrocket-style subscription URL. Servers are grouped by source, latency-probed automatically, one-click-importable.</p>
+      <h3>訂閱匯入</h3>
+      <p>貼上任意 Shadowrocket 風格的訂閱連結。伺服器依來源自動分組並測延遲,一鍵匯入。</p>
     </div>
     <div class="card feature">
-      <h3>Smart routing</h3>
-      <p>Built-in <span class="meta" style="font-family: var(--mono);">geosite:cn</span> rules + your own <span class="meta" style="font-family: var(--mono);">rules.conf</span>. Domestic sites stay direct, ads blocked, everything else proxied.</p>
+      <h3>智慧分流</h3>
+      <p>內建 <span class="meta" style="font-family: var(--mono);">geosite:cn</span> 規則,加上你自己的 <span class="meta" style="font-family: var(--mono);">rules.conf</span>。國內站點直連、廣告攔截、其餘流量走代理。</p>
     </div>
     <div class="card feature">
-      <h3>System-wide via TUN</h3>
-      <p>Kernel-level packet capture for apps that ignore SOCKS. Safe-restore on quit — no orphaned routes.</p>
+      <h3>TUN 全域接管</h3>
+      <p>核心級封包擷取,涵蓋不支援 SOCKS 的應用程式。離開時自動還原路由,不留殘餘設定。</p>
     </div>
     <div class="card feature">
-      <h3>Auto-pick best server</h3>
-      <p>Per-group "Auto" toggle keeps the active profile pinned to the lowest-latency server in your subscription, automatically.</p>
+      <h3>自動選最佳伺服器</h3>
+      <p>每個群組的「自動」開關會持續把作用中的設定固定在訂閱中延遲最低的伺服器。</p>
     </div>
     <div class="card feature">
-      <h3>Five languages</h3>
-      <p>English, 简体中文, 繁體中文, Русский. Auto-detected from your system, switchable in Settings.</p>
+      <h3>五種語言</h3>
+      <p>English、简体中文、繁體中文、Русский。系統語言自動辨識,亦可在設定中手動切換。</p>
     </div>
   </div>
 </section>
 
 <footer>
-  Nexray <span class="mono">${VERSION}</span> · <a href="https://github.com/${PUBLISH_REPO}">GitHub</a> · Proprietary licence
+  Nexray <span class="mono">${VERSION}</span> · <a href="https://github.com/${PUBLISH_REPO}">GitHub</a> · 專屬授權
 </footer>
 
 </div>
@@ -343,11 +340,11 @@
       // shows what's actually available. (Future Intel build — drop
       // the `bundles: dmg` slot back into the matrix and re-add the
       // INTEL filename to the workflow.)
-      setCta(BASE + "/${DMG_ARM}", "Download for macOS (Apple Silicon)");
+      setCta(BASE + "/${DMG_ARM}", "下載 macOS 版本(Apple Silicon)");
     } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-      setCta(BASE + "/${EXE}", "Download for Windows");
+      setCta(BASE + "/${EXE}", "下載 Windows 版本");
     } else if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
-      setCta(BASE + "/${DEB}", "Download for Linux (.deb)");
+      setCta(BASE + "/${DEB}", "下載 Linux 版本(.deb)");
     }
   })();
 </script>

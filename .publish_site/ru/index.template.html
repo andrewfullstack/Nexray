@@ -21,10 +21,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nexray — Modern VLESS proxy client</title>
-<meta name="description" content="A modern, minimal VLESS+REALITY / VLESS+WS+TLS proxy client for macOS, Windows, and Linux.">
-<meta property="og:title" content="Nexray — Modern VLESS proxy client">
-<meta property="og:description" content="VLESS+REALITY and VLESS+WS+TLS only. Tray-app simple, kernel-grade fast.">
+<title>Nexray — современный VLESS-клиент</title>
+<meta name="description" content="Современный минималистичный VLESS+REALITY / VLESS+WS+TLS-клиент для macOS, Windows и Linux.">
+<meta property="og:title" content="Nexray — современный VLESS-клиент">
+<meta property="og:description" content="Только VLESS+REALITY и VLESS+WS+TLS. Простой как иконка в трее, быстрый как ядро.">
 <meta property="og:type" content="website">
 <style>
   :root {
@@ -210,11 +210,11 @@
 </style>
 </head>
 <body>
-<nav class="lang-switcher" aria-label="Language">
-  <a href="/Nexray-App/" class="active" hreflang="en">EN</a>
+<nav class="lang-switcher" aria-label="Язык">
+  <a href="/Nexray-App/" hreflang="en">EN</a>
   <a href="/Nexray-App/zh-CN/" hreflang="zh-CN">简</a>
   <a href="/Nexray-App/zh-TW/" hreflang="zh-TW">繁</a>
-  <a href="/Nexray-App/ru/" hreflang="ru">RU</a>
+  <a href="/Nexray-App/ru/" class="active" hreflang="ru">RU</a>
 </nav>
 
 <div class="container">
@@ -222,20 +222,20 @@
 <header>
   <div class="brand-mark">⚡ Nexray</div>
   <div class="version-pill">${VERSION}</div>
-  <h1>Modern VLESS proxy client.</h1>
-  <p class="tagline">VLESS+REALITY and VLESS+WS+TLS only. Tray-app simple, kernel-grade fast.</p>
+  <h1>Современный VLESS-клиент.</h1>
+  <p class="tagline">Только VLESS+REALITY и VLESS+WS+TLS. Простой как иконка в трее, быстрый как ядро.</p>
   <div class="cta-row">
-    <a id="primary-cta" class="cta cta-primary" href="#downloads">Download</a>
-    <a class="cta cta-secondary" href="https://github.com/${PUBLISH_REPO}/releases">All releases</a>
+    <a id="primary-cta" class="cta cta-primary" href="#downloads">Скачать</a>
+    <a class="cta cta-secondary" href="https://github.com/${PUBLISH_REPO}/releases">Все релизы</a>
   </div>
 </header>
 
 <section id="downloads">
-  <h2>Download</h2>
+  <h2>Скачать</h2>
   <div class="platform-grid">
     <div class="card" data-os="mac-arm">
       <h3>macOS</h3>
-      <div class="meta">Apple Silicon · M-series</div>
+      <div class="meta">Apple Silicon · серия M</div>
       <a class="download-link" href="${BASE}/${DMG_ARM}">${DMG_ARM}</a>
     </div>
     <div class="card" data-os="linux">
@@ -245,78 +245,78 @@
     </div>
     <div class="card" data-os="windows">
       <h3>Windows</h3>
-      <div class="meta">x86_64 · NSIS installer</div>
+      <div class="meta">x86_64 · установщик NSIS</div>
       <a class="download-link" href="${BASE}/${EXE}">${EXE}</a>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>First launch</h2>
+  <h2>Первый запуск</h2>
   <p style="color: var(--fg-2); font-size: 0.92rem; margin-bottom: 1rem;">
-    The current builds are unsigned. macOS will refuse to open the
-    <code style="font-family: var(--mono);">.dmg</code> on first launch and Windows SmartScreen
-    will warn before running the
-    <code style="font-family: var(--mono);">.exe</code>. Both are bypassed in seconds:
+    Сборки пока без цифровой подписи. macOS откажется открывать
+    <code style="font-family: var(--mono);">.dmg</code> при первом запуске,
+    а Windows SmartScreen покажет предупреждение перед запуском
+    <code style="font-family: var(--mono);">.exe</code>. И то и другое обходится за секунды:
   </p>
   <div class="feature-grid">
     <div class="card feature">
-      <h3>macOS — clear the quarantine flag</h3>
+      <h3>macOS — снять флаг карантина</h3>
       <p>
-        After dragging <code style="font-family: var(--mono);">Nexray.app</code> into
-        <code style="font-family: var(--mono);">/Applications</code>, run this once in Terminal
-        (you'll be prompted for your password):
+        Перетащите <code style="font-family: var(--mono);">Nexray.app</code> в
+        <code style="font-family: var(--mono);">/Applications</code>, затем выполните в Терминале
+        (запросит пароль):
       </p>
 <pre style="background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; font-family: var(--mono); font-size: 0.82rem; overflow-x: auto; margin-top: 0.5rem; color: var(--fg);">sudo xattr -dr com.apple.quarantine /Applications/Nexray.app</pre>
       <p style="margin-top: 0.5rem; font-size: 0.85rem;">
-        Then double-click as normal. No need to repeat after updates installed via the same path.
+        После этого открывайте обычным двойным кликом. Если обновляете в тот же
+        каталог — повторять команду не нужно.
       </p>
     </div>
     <div class="card feature">
-      <h3>Windows — Run anyway</h3>
+      <h3>Windows — Выполнить в любом случае</h3>
       <p>
-        Double-click the
-        <code style="font-family: var(--mono);">.exe</code>. SmartScreen shows
-        "Windows protected your PC". Click <strong>More info</strong> →
-        <strong>Run anyway</strong>. The warning appears only on first launch
-        of each version.
+        Дважды кликните по <code style="font-family: var(--mono);">.exe</code>. SmartScreen
+        выдаст «Система Windows защитила ваш компьютер». Нажмите
+        <strong>Подробнее</strong> → <strong>Выполнить в любом случае</strong>.
+        Предупреждение появляется только при первом запуске каждой версии.
       </p>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>Why Nexray</h2>
+  <h2>Почему Nexray</h2>
   <div class="feature-grid">
     <div class="card feature">
-      <h3>VLESS only</h3>
-      <p>Refuses VMess, Shadowsocks, Trojan, and every other legacy or insecure-by-default combination — by design.</p>
+      <h3>Только VLESS</h3>
+      <p>Отказывается работать с VMess, Shadowsocks, Trojan и любыми устаревшими или небезопасными по умолчанию комбинациями — это сознательное решение.</p>
     </div>
     <div class="card feature">
-      <h3>Subscription import</h3>
-      <p>Paste any Shadowrocket-style subscription URL. Servers are grouped by source, latency-probed automatically, one-click-importable.</p>
+      <h3>Импорт подписок</h3>
+      <p>Вставьте любую подписку в стиле Shadowrocket. Серверы группируются по источнику, латентность измеряется автоматически, импорт — в один клик.</p>
     </div>
     <div class="card feature">
-      <h3>Smart routing</h3>
-      <p>Built-in <span class="meta" style="font-family: var(--mono);">geosite:cn</span> rules + your own <span class="meta" style="font-family: var(--mono);">rules.conf</span>. Domestic sites stay direct, ads blocked, everything else proxied.</p>
+      <h3>Умная маршрутизация</h3>
+      <p>Встроенные правила <span class="meta" style="font-family: var(--mono);">geosite:cn</span> + ваш собственный <span class="meta" style="font-family: var(--mono);">rules.conf</span>. Локальные сайты — напрямую, реклама — заблокирована, остальное — через прокси.</p>
     </div>
     <div class="card feature">
-      <h3>System-wide via TUN</h3>
-      <p>Kernel-level packet capture for apps that ignore SOCKS. Safe-restore on quit — no orphaned routes.</p>
+      <h3>Системный TUN</h3>
+      <p>Перехват пакетов на уровне ядра для приложений, игнорирующих SOCKS. Корректное восстановление маршрутов при выходе — никаких висячих правил.</p>
     </div>
     <div class="card feature">
-      <h3>Auto-pick best server</h3>
-      <p>Per-group "Auto" toggle keeps the active profile pinned to the lowest-latency server in your subscription, automatically.</p>
+      <h3>Авто-выбор лучшего сервера</h3>
+      <p>Переключатель «Авто» в каждой группе автоматически закрепляет активный сервер за самым быстрым в подписке.</p>
     </div>
     <div class="card feature">
-      <h3>Five languages</h3>
-      <p>English, 简体中文, 繁體中文, Русский. Auto-detected from your system, switchable in Settings.</p>
+      <h3>Пять языков</h3>
+      <p>English, 简体中文, 繁體中文, Русский. Язык подхватывается из системы, переключается в Настройках.</p>
     </div>
   </div>
 </section>
 
 <footer>
-  Nexray <span class="mono">${VERSION}</span> · <a href="https://github.com/${PUBLISH_REPO}">GitHub</a> · Proprietary licence
+  Nexray <span class="mono">${VERSION}</span> · <a href="https://github.com/${PUBLISH_REPO}">GitHub</a> · Проприетарная лицензия
 </footer>
 
 </div>
@@ -343,11 +343,11 @@
       // shows what's actually available. (Future Intel build — drop
       // the `bundles: dmg` slot back into the matrix and re-add the
       // INTEL filename to the workflow.)
-      setCta(BASE + "/${DMG_ARM}", "Download for macOS (Apple Silicon)");
+      setCta(BASE + "/${DMG_ARM}", "Скачать для macOS (Apple Silicon)");
     } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-      setCta(BASE + "/${EXE}", "Download for Windows");
+      setCta(BASE + "/${EXE}", "Скачать для Windows");
     } else if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
-      setCta(BASE + "/${DEB}", "Download for Linux (.deb)");
+      setCta(BASE + "/${DEB}", "Скачать для Linux (.deb)");
     }
   })();
 </script>

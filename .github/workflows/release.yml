@@ -341,16 +341,24 @@ jobs:
           # Whitelisted-variable substitution: only the names listed
           # below are interpolated; any other `$` in the template is
           # left intact.
-          envsubst '${VERSION} ${PUBLISH_REPO} ${BASE} ${DMG_ARM} ${DEB} ${EXE}' \
-            < .publish_site/index.template.html \
-            > ./pages/index.html
+          VARS='${VERSION} ${PUBLISH_REPO} ${BASE} ${DMG_ARM} ${DEB} ${EXE}'
+          # English template lives at .publish_site/index.template.html;
+          # each non-default locale has its own copy under a matching
+          # subdirectory. The same variable whitelist applies to all.
+          envsubst "$VARS" < .publish_site/index.template.html > ./pages/index.html
+          for locale in zh-CN zh-TW ru ; do
+            mkdir -p "./pages/$locale"
+            envsubst "$VARS" \
+              < ".publish_site/$locale/index.template.html" \
+              > "./pages/$locale/index.html"
+          done
           # Pages serves any folder Jekyll-style by default; .nojekyll
           # disables that so the HTML is served verbatim (no risk of
           # `_*` filenames being hidden, no Liquid interpolation).
           touch ./pages/.nojekyll
           echo "--- rendered ---"
-          ls -la ./pages
-          head -20 ./pages/index.html
+          find ./pages -type f -print
+          head -10 ./pages/index.html
 
       - name: Deploy site to gh-pages of andrewfullstack/Nexray-App
         env:
@@ -387,18 +395,25 @@ jobs:
             exit 1
           fi
           # Same single-commit-force-push pattern as gh-pages: main on
-          # the public repo holds nothing but the README, replaced
-          # wholesale on every release. The only authoritative copy of
-          # the public README lives in `.publish_site/README.md` in the
-          # source repo.
+          # the public repo holds nothing but the README family,
+          # replaced wholesale on every release. The only authoritative
+          # copies live in `.publish_site/` in the source repo:
+          #
+          #   README.md       (English — repo home page)
+          #   README.zh-CN.md  (Simplified Chinese)
+          #   README.zh-TW.md  (Traditional Chinese)
+          #   README.ru.md    (Russian)
           mkdir -p ./public-main
-          cp .publish_site/README.md ./public-main/README.md
+          cp .publish_site/README.md       ./public-main/README.md
+          cp .publish_site/README.zh-CN.md ./public-main/README.zh-CN.md
+          cp .publish_site/README.zh-TW.md ./public-main/README.zh-TW.md
+          cp .publish_site/README.ru.md    ./public-main/README.ru.md
           cd ./public-main
           git init -q -b main
           git config user.name  "andrewfullstack"
           git config user.email "278670969+andrewfullstack@users.noreply.github.com"
-          git add README.md
-          git commit -q -m "Sync README from Nexray@${{ github.sha }} (${{ github.ref_name }})"
+          git add README.md README.zh-CN.md README.zh-TW.md README.ru.md
+          git commit -q -m "Sync READMEs from Nexray@${{ github.sha }} (${{ github.ref_name }})"
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/andrewfullstack/Nexray-App.git"
           git push --force --quiet origin main
           echo "::notice title=README synced::andrewfullstack/Nexray-App/main updated from .publish_site/README.md"

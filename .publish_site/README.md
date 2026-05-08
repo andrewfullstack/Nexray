@@ -1,5 +1,7 @@
 # Nexray
 
+[English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md)
+
 Modern, minimal VLESS proxy client for macOS, Linux, and Windows.
 Tray-app simple, kernel-grade fast.
 
@@ -14,9 +16,29 @@ Tray-app simple, kernel-grade fast.
 | Linux                 | x86_64       | `nexray_<version>_amd64.deb`            |
 | Windows               | x86_64       | `Nexray_<version>_x64-setup.exe`        |
 
-> The macOS build is currently unsigned. On first launch right-click → **Open**
-> to bypass Gatekeeper. Windows builds will show a SmartScreen warning until
-> code-signing is configured.
+## First launch — bypass the unsigned-binary warnings
+
+The current builds are unsigned. macOS will refuse to open the `.dmg`
+on first launch and Windows SmartScreen warns before running the `.exe`.
+Both are bypassed in seconds:
+
+### macOS — clear the quarantine flag
+
+After dragging `Nexray.app` into `/Applications`, run this once in
+Terminal (you'll be prompted for your password):
+
+```bash
+sudo xattr -dr com.apple.quarantine /Applications/Nexray.app
+```
+
+Then double-click as normal. Subsequent updates installed to the same
+path don't need the command repeated.
+
+### Windows — Run anyway
+
+Double-click the `.exe`. SmartScreen shows **"Windows protected your PC"**.
+Click **More info** → **Run anyway**. The warning appears only on first
+launch of each version.
 
 ## Highlights
 
