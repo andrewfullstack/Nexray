@@ -15,8 +15,13 @@
 //!   prompt; the inner shell backgrounds tun2socks (echoing its PID to
 //!   stdout so we can track it), then polls a sigfile so teardown only
 //!   needs *one* prompt per session.
-//! - **Linux** — TODO Phase 6.x: wrap with `pkexec` for the polkit prompt,
-//!   falling back to a clear error when polkit is absent.
+//! - **Linux** — wrap the spawn in `pkexec`, which polkit displays as a
+//!   graphical auth dialog (or TTY prompt under SSH). The launcher script
+//!   uses `ip route` / `ip addr` to install the same split-default routing
+//!   the macOS path uses, plus per-host bypass routes for the proxy
+//!   server's IP so xray's upstream connection doesn't loop back through
+//!   the tunnel. Falls back to direct (unprivileged) spawn — which then
+//!   surfaces the EPERM error to the user — when `pkexec` isn't installed.
 //! - **Windows** — TODO Phase 6.x: wrap with `ShellExecuteEx` `runas` verb
 //!   for the UAC prompt, or use the `windows::Win32::UI::Shell` APIs.
 //!
@@ -159,23 +164,25 @@ impl TunSupervisor {
                     let _ = std::fs::write(p, launcher_pid.to_string());
                 }
             }
-            #[cfg(target_os = "macos")]
-            SpawnedLauncher::Osascript {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            SpawnedLauncher::Privileged {
                 mut child,
                 pidfile,
                 log_path,
                 iface_file,
             } => {
-                // macOS path. osascript stays alive for the whole session;
-                // it presents the password prompt, runs the launcher script
-                // as root, and only exits when the launcher exits (which
-                // happens via sigfile teardown). We poll the pidfile to
-                // learn when tun2socks is up.
+                // Elevated path (osascript on macOS, pkexec on Linux). The
+                // wrapper stays alive for the whole session: it presents
+                // the password prompt, runs the launcher script as root,
+                // and only exits when the launcher exits (which happens
+                // via sigfile teardown). We poll the pidfile to learn
+                // when tun2socks is up.
                 //
-                // Race window: osascript may fail (user cancelled) before
-                // the pidfile appears. So we interleave try_wait() with
-                // pidfile polling, with a generous timeout to account for
-                // the human typing their password.
+                // Race window: the wrapper may fail (user cancelled the
+                // auth prompt) before the pidfile appears. So we
+                // interleave try_wait() with pidfile polling, with a
+                // generous timeout to account for the human typing their
+                // password.
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
                 let pid_result = loop {
                     match child.try_wait() {
@@ -184,7 +191,7 @@ impl TunSupervisor {
                             // may not exist. If it does, we caught it after
                             // a fast tun2socks crash; surface the log.
                             break Err(format!(
-                                "osascript exited before pidfile appeared: {status}"
+                                "elevation wrapper exited before pidfile appeared: {status}"
                             ));
                         }
                         Ok(None) => {}
@@ -206,8 +213,8 @@ impl TunSupervisor {
                 let pid = match pid_result {
                     Ok(pid) => pid,
                     Err(why) => {
-                        // Best-effort: kill osascript so it doesn't hang
-                        // around if the prompt was still up.
+                        // Best-effort: kill the wrapper so it doesn't
+                        // hang around if the prompt was still up.
                         let _ = child.kill();
                         let _ = child.wait();
                         // Read the launcher log (where tun2socks's FATAL
@@ -236,7 +243,7 @@ impl TunSupervisor {
                         // around that.
                         tracing::warn!(
                             target: "tun",
-                            "osascript bring-up failed: {why}; log tail: {log_excerpt}",
+                            "privileged bring-up failed: {why}; log tail: {log_excerpt}",
                         );
                         let msg = "TUN Start failed without auth".to_string();
                         inner.state = TunState::Failed;
@@ -430,13 +437,17 @@ impl Drop for Inner {
 /// channels (pidfile, log) that the supervisor polls/tails after osascript
 /// exits.
 enum SpawnedLauncher {
-    /// Unprivileged or non-macOS: `Child` is tun2socks itself.
+    /// Unprivileged: `Child` is tun2socks itself. Used by the test bypass
+    /// (`NEXRAY_TUN_NO_ELEVATION=1`) and as the fallback on platforms
+    /// without an elevation strategy.
     Direct(Child),
-    /// macOS-with-elevation: `Child` is osascript, kept alive for the full
-    /// session. The launcher writes the actually-chosen iface name to
-    /// `iface_file` (in case the hint we passed was busy and it iterated).
-    #[cfg(target_os = "macos")]
-    Osascript {
+    /// Elevated launcher: `Child` is the elevation wrapper (osascript on
+    /// macOS, pkexec on Linux), kept alive for the full session. The
+    /// launcher script writes its actually-chosen iface name to
+    /// `iface_file` (on macOS the hint may be busy so it iterates utun
+    /// numbers; on Linux this just records the hint we passed in).
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Privileged {
         child: Child,
         pidfile: PathBuf,
         log_path: PathBuf,
@@ -459,9 +470,23 @@ fn spawn_strategy(
     {
         spawn_via_osascript(binary, iface, socks_addr, sigfile, bypass_ips)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
-        let _ = sigfile; // unused outside macOS
+        // pkexec missing → polkit isn't installed; fall back to direct.
+        // tun2socks will then immediately surface the EPERM error to the
+        // user with a "launch with sudo or grant the helper tool" hint.
+        if !pkexec_available() {
+            tracing::warn!(
+                target: "tun",
+                "pkexec not on PATH — falling back to unprivileged spawn (tun2socks will EPERM)",
+            );
+            return spawn_unprivileged(binary, iface, socks_addr).map(SpawnedLauncher::Direct);
+        }
+        spawn_via_pkexec(binary, iface, socks_addr, sigfile, bypass_ips)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = sigfile; // unused outside macOS / Linux
         let _ = bypass_ips;
         spawn_unprivileged(binary, iface, socks_addr).map(SpawnedLauncher::Direct)
     }
@@ -511,7 +536,7 @@ fn spawn_via_osascript(
     let log_path = tmp.join(format!("nexray-tun-{nonce}.log"));
     let pidfile_path = tmp.join(format!("nexray-tun-{nonce}.pid"));
     let iface_file = tmp.join(format!("nexray-tun-{nonce}.iface"));
-    let script = build_launcher_script(LauncherPaths {
+    let script = build_launcher_script_macos(LauncherPaths {
         log: &log_path,
         pidfile: &pidfile_path,
         sigfile,
@@ -553,7 +578,7 @@ fn spawn_via_osascript(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let child = cmd.spawn()?;
-    Ok(SpawnedLauncher::Osascript {
+    Ok(SpawnedLauncher::Privileged {
         child,
         pidfile: pidfile_path,
         log_path,
@@ -561,7 +586,81 @@ fn spawn_via_osascript(
     })
 }
 
-/// Inputs to `build_launcher_script`. Bundled so the call site is self-
+/// Linux-only: wrap tun2socks in `pkexec /bin/bash <launcher>`. polkit
+/// presents a graphical auth dialog (or TTY prompt under SSH); after the
+/// user authenticates, pkexec setuid's to root and execs bash on the
+/// launcher script. The pkexec process stays alive for the full session
+/// (the script blocks until the sigfile is touched), so `disable()` can
+/// SIGTERM it to tear everything down — the launcher's poll loop catches
+/// the parent-died signal as a fallback. One auth prompt per session.
+#[cfg(target_os = "linux")]
+fn spawn_via_pkexec(
+    binary: &Path,
+    iface: &str,
+    socks_addr: &str,
+    sigfile: &Path,
+    bypass_ips: &[String],
+) -> std::io::Result<SpawnedLauncher> {
+    let nonce = now_ms();
+    let tmp = std::env::temp_dir();
+    let script_path = tmp.join(format!("nexray-tun-launcher-{nonce}.sh"));
+    let log_path = tmp.join(format!("nexray-tun-{nonce}.log"));
+    let pidfile_path = tmp.join(format!("nexray-tun-{nonce}.pid"));
+    let iface_file = tmp.join(format!("nexray-tun-{nonce}.iface"));
+    let script = build_launcher_script_linux(LauncherPaths {
+        log: &log_path,
+        pidfile: &pidfile_path,
+        sigfile,
+        binary,
+        iface,
+        socks_addr,
+        bypass_ips,
+        iface_file: &iface_file,
+        parent_pid: std::process::id(),
+    });
+    std::fs::write(&script_path, script)?;
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(&script_path)?.permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script_path, perms)?;
+
+    // `pkexec` exits with the child's status; signals (SIGTERM) are
+    // propagated to the elevated process by pkexec's own signal handler.
+    // We pass `--disable-internal-agent` so polkit's text agent doesn't
+    // try to grab a TTY when the desktop's polkit-gnome / kdewallet /
+    // mate-polkit agent is already running and would prompt graphically.
+    let mut cmd = Command::new("pkexec");
+    cmd.arg("--disable-internal-agent")
+        .arg("/bin/bash")
+        .arg(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = cmd.spawn()?;
+    Ok(SpawnedLauncher::Privileged {
+        child,
+        pidfile: pidfile_path,
+        log_path,
+        iface_file,
+    })
+}
+
+/// Manual `which pkexec`: walk PATH and stat each candidate. Avoids a
+/// new dep just for this one check. Linux-only.
+#[cfg(target_os = "linux")]
+fn pkexec_available() -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    for dir in std::env::split_paths(&path) {
+        if dir.join("pkexec").is_file() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Inputs to `build_launcher_script_*`. Bundled so the call site is self-
 /// documenting and the test can construct one inline.
 #[doc(hidden)]
 pub struct LauncherPaths<'a> {
@@ -593,13 +692,14 @@ pub struct LauncherPaths<'a> {
     pub parent_pid: u32,
 }
 
-/// Generate the bash launcher script that the privileged osascript shell
-/// execs. Extracted so tests can run it directly (without osascript) and
-/// verify the FSM contracts: writes pidfile, drains stderr to log, removes
-/// pidfile on exit, honours the sigfile for cooperative shutdown, and
-/// brings up routing so packets actually flow through the tunnel.
+/// Generate the macOS bash launcher script that the privileged osascript
+/// shell execs. Extracted so tests can run it directly (without osascript)
+/// and verify the FSM contracts: writes pidfile, drains stderr to log,
+/// removes pidfile on exit, honours the sigfile for cooperative shutdown,
+/// and brings up routing so packets actually flow through the tunnel.
 #[doc(hidden)]
-pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
+#[cfg(target_os = "macos")]
+pub fn build_launcher_script_macos(p: LauncherPaths<'_>) -> String {
     // Bypass IPs become a space-separated list embedded in the script.
     // We trust the supervisor to have validated these (they came out of
     // a DNS lookup of the active profile's address). Filter to safe chars
@@ -784,10 +884,179 @@ pub fn build_launcher_script(p: LauncherPaths<'_>) -> String {
     )
 }
 
+/// Linux equivalent of `build_launcher_script_macos`. Same FSM —
+/// pidfile + sigfile + parent-pid watch + cooperative teardown — but
+/// uses iproute2 (`ip link`, `ip addr`, `ip route`) instead of macOS
+/// `ifconfig`/`route`. tun2socks creates the device once it's running
+/// as root; we then bring it up, assign IPs, install split-default
+/// routes that beat the existing default by specificity, and add per-
+/// host bypass routes so xray's upstream connection escapes the tunnel.
+#[doc(hidden)]
+#[cfg(target_os = "linux")]
+pub fn build_launcher_script_linux(p: LauncherPaths<'_>) -> String {
+    let bypass_list = p
+        .bypass_ips
+        .iter()
+        .filter(|ip| {
+            ip.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == ':')
+        })
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    format!(
+        "#!/bin/bash\n\
+         set -u\n\
+         LOG={log:?}\n\
+         PIDFILE={pid:?}\n\
+         SIGFILE={sig:?}\n\
+         IFACE_FILE={iface_file:?}\n\
+         BIN={bin:?}\n\
+         IFACE_HINT={iface:?}\n\
+         PROXY=\"socks5://{socks}\"\n\
+         BYPASS_IPS=\"{bypass}\"\n\
+         PARENT_PID={parent_pid}\n\
+         TUN_IP=\"198.18.0.1\"\n\
+         \n\
+         : > \"$LOG\"\n\
+         chmod 644 \"$LOG\"\n\
+         \n\
+         # Linux iface naming is unconstrained — keep the hint as-is.\n\
+         IFACE=\"$IFACE_HINT\"\n\
+         echo \"$IFACE\" > \"$IFACE_FILE\"\n\
+         chmod 644 \"$IFACE_FILE\"\n\
+         \n\
+         {{\n\
+           echo \"--- nexray-tun launcher diag (linux) ---\"\n\
+           echo \"date: $(date)\"\n\
+           echo \"uid=$(id -u) gid=$(id -g) user=$(id -un)\"\n\
+           echo \"pid=$$ ppid=$PPID\"\n\
+           echo \"BIN=$BIN\"\n\
+           echo \"IFACE_HINT=$IFACE_HINT IFACE_PICKED=$IFACE TUN_IP=$TUN_IP\"\n\
+           echo \"BYPASS_IPS=$BYPASS_IPS\"\n\
+         }} >> \"$LOG\" 2>&1\n\
+         \n\
+         # Discover the original default gateway+iface BEFORE we touch\n\
+         # routing, so bypass routes can escape the tunnel and we can\n\
+         # restore the prior state on teardown.\n\
+         DEF_LINE=$(ip -4 route show default 2>/dev/null | head -1)\n\
+         LOCAL_GW=$(echo \"$DEF_LINE\" | awk '{{print $3}}')\n\
+         LOCAL_IF=$(echo \"$DEF_LINE\" | awk '{{for(i=1;i<=NF;i++) if($i==\"dev\") print $(i+1)}}')\n\
+         DEF_LINE6=$(ip -6 route show default 2>/dev/null | head -1)\n\
+         LOCAL_GW6=$(echo \"$DEF_LINE6\" | awk '{{print $3}}')\n\
+         LOCAL_IF6=$(echo \"$DEF_LINE6\" | awk '{{for(i=1;i<=NF;i++) if($i==\"dev\") print $(i+1)}}')\n\
+         echo \"LOCAL_GW=$LOCAL_GW LOCAL_IF=$LOCAL_IF LOCAL_GW6=$LOCAL_GW6 LOCAL_IF6=$LOCAL_IF6\" >> \"$LOG\"\n\
+         echo \"--- tun2socks output below ---\" >> \"$LOG\"\n\
+         \n\
+         # Background tun2socks; stderr/stdout both → LOG.\n\
+         \"$BIN\" -device \"$IFACE\" -proxy \"$PROXY\" -loglevel warn \\\n\
+           >>\"$LOG\" 2>&1 &\n\
+         TUN_PID=$!\n\
+         echo \"$TUN_PID\" > \"$PIDFILE\"\n\
+         chmod 644 \"$PIDFILE\"\n\
+         echo \"tun2socks spawned with pid=$TUN_PID\" >> \"$LOG\"\n\
+         \n\
+         # Give tun2socks ~500ms to ioctl(TUNSETIFF) and create the device.\n\
+         sleep 0.5\n\
+         \n\
+         # Bring the device up and assign IPv4 + IPv6 ULA addresses.\n\
+         ip link set \"$IFACE\" mtu 1500 up >> \"$LOG\" 2>&1 \\\n\
+           && echo \"ip link set $IFACE up\" >> \"$LOG\"\n\
+         ip addr add \"$TUN_IP/30\" dev \"$IFACE\" >> \"$LOG\" 2>&1 \\\n\
+           && echo \"ip addr add $TUN_IP/30 dev $IFACE\" >> \"$LOG\"\n\
+         ip -6 addr add \"fc00::1/128\" dev \"$IFACE\" >> \"$LOG\" 2>&1 \\\n\
+           && echo \"ip -6 addr add fc00::1/128 dev $IFACE\" >> \"$LOG\"\n\
+         \n\
+         # Bypass routes: each proxy-server IP must reach the network via\n\
+         # the ORIGINAL default gateway, otherwise xray's upstream\n\
+         # connection would loop back into the tunnel forever.\n\
+         for IP in $BYPASS_IPS; do\n\
+           if [[ \"$IP\" == *:* ]]; then\n\
+             if [ -n \"$LOCAL_GW6\" ] && [ -n \"$LOCAL_IF6\" ]; then\n\
+               ip -6 route add \"$IP\" via \"$LOCAL_GW6\" dev \"$LOCAL_IF6\" >> \"$LOG\" 2>&1 \\\n\
+                 && echo \"bypass v6: $IP -> $LOCAL_GW6 dev $LOCAL_IF6\" >> \"$LOG\"\n\
+             fi\n\
+           else\n\
+             if [ -n \"$LOCAL_GW\" ] && [ -n \"$LOCAL_IF\" ]; then\n\
+               ip route add \"$IP\" via \"$LOCAL_GW\" dev \"$LOCAL_IF\" >> \"$LOG\" 2>&1 \\\n\
+                 && echo \"bypass v4: $IP -> $LOCAL_GW dev $LOCAL_IF\" >> \"$LOG\"\n\
+             fi\n\
+           fi\n\
+         done\n\
+         \n\
+         # Split-default trick (matches the macOS path): /1 + /1 routes\n\
+         # cover all of 0/0 and ::/0 with higher specificity than the\n\
+         # existing default, so they win without us touching the original\n\
+         # default route entry. Easy clean rollback at teardown.\n\
+         ip route add 0.0.0.0/1 dev \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         ip route add 128.0.0.0/1 dev \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         ip -6 route add ::/1 dev \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         ip -6 route add 8000::/1 dev \"$IFACE\" >> \"$LOG\" 2>&1\n\
+         echo \"split-default routes (v4+v6) installed via $IFACE\" >> \"$LOG\"\n\
+         \n\
+         # Cooperative shutdown loop. Polls every 0.3s for either:\n\
+         #   1. sigfile present → user clicked Stop TUN cleanly\n\
+         #   2. parent (nexray) PID dead → app force-quit / Ctrl+C / crashed\n\
+         REASON=\"\"\n\
+         while kill -0 \"$TUN_PID\" 2>/dev/null; do\n\
+           if [ -e \"$SIGFILE\" ]; then\n\
+             rm -f \"$SIGFILE\"\n\
+             REASON=\"sigfile\"\n\
+             break\n\
+           fi\n\
+           if ! kill -0 \"$PARENT_PID\" 2>/dev/null; then\n\
+             REASON=\"parent_died\"\n\
+             break\n\
+           fi\n\
+           sleep 0.3\n\
+         done\n\
+         echo \"shutdown trigger: ${{REASON:-tun2socks_exited}}\" >> \"$LOG\"\n\
+         if [ -n \"$REASON\" ]; then\n\
+           kill -TERM \"$TUN_PID\" 2>/dev/null || true\n\
+           sleep 1\n\
+           kill -KILL \"$TUN_PID\" 2>/dev/null || true\n\
+         fi\n\
+         \n\
+         wait \"$TUN_PID\" 2>/dev/null\n\
+         echo \"tun2socks exited with status $?\" >> \"$LOG\"\n\
+         \n\
+         # Tear down routes and addresses we installed. Errors are\n\
+         # swallowed because some entries may already be gone (e.g.\n\
+         # tun2socks deletes the device on exit).\n\
+         ip route del 0.0.0.0/1 dev \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         ip route del 128.0.0.0/1 dev \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         ip -6 route del ::/1 dev \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         ip -6 route del 8000::/1 dev \"$IFACE\" >> \"$LOG\" 2>&1 || true\n\
+         for IP in $BYPASS_IPS; do\n\
+           if [[ \"$IP\" == *:* ]]; then\n\
+             [ -n \"$LOCAL_GW6\" ] && ip -6 route del \"$IP\" via \"$LOCAL_GW6\" >> \"$LOG\" 2>&1 || true\n\
+           else\n\
+             [ -n \"$LOCAL_GW\" ] && ip route del \"$IP\" via \"$LOCAL_GW\" >> \"$LOG\" 2>&1 || true\n\
+           fi\n\
+         done\n\
+         ip link set \"$IFACE\" down >> \"$LOG\" 2>&1 || true\n\
+         echo \"routing torn down\" >> \"$LOG\"\n\
+         \n\
+         rm -f \"$PIDFILE\"\n\
+         rm -f \"$IFACE_FILE\"\n\
+         exit 0\n",
+        log = p.log,
+        pid = p.pidfile,
+        sig = p.sigfile,
+        iface_file = p.iface_file,
+        bin = p.binary,
+        iface = p.iface,
+        socks = p.socks_addr,
+        bypass = bypass_list,
+        parent_pid = p.parent_pid,
+    )
+}
+
 /// Tail the per-session log file, feeding lines through the same sticky-
 /// error pipeline as `drain_lines`. Stops when the pidfile vanishes (the
 /// launcher's exit signal) or when EOF + 1s passes with no new data.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn tail_log(log_path: &Path, pidfile_path: &Path, inner_arc: Arc<Mutex<Inner>>) {
     use std::fs::File;
     use std::io::{BufRead, BufReader, Seek};

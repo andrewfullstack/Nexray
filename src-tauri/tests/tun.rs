@@ -259,7 +259,7 @@ fn cloning_supervisor_does_not_disable_running_child() {
 #[cfg(target_os = "macos")]
 #[test]
 fn launcher_script_pidfile_and_sigfile_lifecycle() {
-    use nexray::tun::{build_launcher_script, LauncherPaths};
+    use nexray::tun::{build_launcher_script_macos, LauncherPaths};
     use std::process::Command;
 
     let dir = std::env::temp_dir().join(format!(
@@ -274,7 +274,7 @@ fn launcher_script_pidfile_and_sigfile_lifecycle() {
     let sigfile_path = dir.join("tun.sig");
     let iface_file_path = dir.join("tun.iface");
 
-    let script = build_launcher_script(LauncherPaths {
+    let script = build_launcher_script_macos(LauncherPaths {
         log: &log_path,
         pidfile: &pidfile_path,
         sigfile: &sigfile_path,
@@ -355,7 +355,7 @@ fn launcher_script_pidfile_and_sigfile_lifecycle() {
 #[cfg(target_os = "macos")]
 #[test]
 fn launcher_tears_down_when_parent_dies() {
-    use nexray::tun::{build_launcher_script, LauncherPaths};
+    use nexray::tun::{build_launcher_script_macos, LauncherPaths};
     use std::process::Command;
 
     let dir = std::env::temp_dir().join(format!(
@@ -379,7 +379,7 @@ fn launcher_tears_down_when_parent_dies() {
         .expect("spawn fake parent");
     let fake_parent_pid = fake_parent.id();
 
-    let script = build_launcher_script(LauncherPaths {
+    let script = build_launcher_script_macos(LauncherPaths {
         log: &log_path,
         pidfile: &pidfile_path,
         sigfile: &sigfile_path,
