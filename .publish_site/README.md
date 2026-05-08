@@ -52,5 +52,8 @@ or derivative work is not permitted without prior written consent of the
 copyright holder. The installer binaries above are licensed for personal
 use; contact the owner for any other use case.
 
-Bundled third-party components (xray-core, tun2socks, geoip/geosite
-databases) remain under their respective upstream licenses.
+Bundled third-party components remain under their respective upstream
+licenses. The full per-component breakdown — including the MPL-2.0
+notice for `xray-core`, the MIT notice for `tun2socks`, and the GPL-3.0
+notice for the geoip/geosite data files — ships inside every installer
+as `THIRD_PARTY_LICENSES.md`.

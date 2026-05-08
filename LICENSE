@@ -31,4 +31,6 @@ the use or other dealings in the Software.
 Third-party components bundled with this software (xray-core, tun2socks,
 geoip / geosite databases, NPM and Cargo dependencies) remain governed
 by their respective upstream licenses; nothing in this notice purports
-to relicense them.
+to relicense them. A per-component summary of those licenses, including
+upstream URLs and attribution, is in THIRD_PARTY_LICENSES.md alongside
+this file (and inside every installer).

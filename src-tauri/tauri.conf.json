@@ -48,7 +48,9 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "binaries"
+      "binaries",
+      "../LICENSE",
+      "../THIRD_PARTY_LICENSES.md"
     ],
     "category": "Utility",
     "shortDescription": "Minimal modern VLESS client",

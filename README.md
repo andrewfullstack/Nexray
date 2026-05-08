@@ -115,3 +115,5 @@ permitted without prior written consent of the copyright holder.
 
 Bundled third-party components (xray-core, tun2socks, geoip/geosite, npm
 and Cargo dependencies) remain under their respective upstream licenses.
+See [`THIRD_PARTY_LICENSES.md`](./THIRD_PARTY_LICENSES.md) for the
+per-component breakdown.
