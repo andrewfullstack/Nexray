@@ -124,9 +124,9 @@ jobs:
 
       # Build-only mode: NO `tagName` argument, so `tauri-action` skips
       # its own release-creation step and just produces installer
-      # bundles in `src-tauri/target/<triple>/release/bundle/`. The
-      # cross-repo publish job below picks them up via workflow
-      # artifacts.
+      # bundles in `target/<triple>/release/bundle/` (workspace target,
+      # at the repo root — NOT under src-tauri/). The cross-repo
+      # publish job below picks them up via workflow artifacts.
       - name: Build & bundle
         uses: tauri-apps/tauri-action@v0
         env:
@@ -152,9 +152,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./release-staging
-          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
+          # Cargo's workspace `target/` lives at the repo root (the
+          # workspace members live in src-tauri/, crates/*, but the
+          # build artefacts go to <root>/target/). The path is NOT
+          # under src-tauri/ — earlier wiring assumed it was and the
+          # collect step always failed with "expected bundle dir not
+          # found".
+          BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
           if [ ! -d "$BUNDLE_DIR" ]; then
             echo "::error::expected bundle dir not found: $BUNDLE_DIR"
+            ls -la target/${{ matrix.target }}/release 2>&1 || true
             exit 1
           fi
           # One installer per platform: .dmg (macOS arm64), .deb (Linux
