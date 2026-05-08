@@ -114,7 +114,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Fetch xray-core + tun2socks + geo data
-        run: pnpm run fetch-core -- --target=${{ matrix.target }}
+        # pnpm v9 passes everything after the script name as positional
+        # args to the script — no `--` separator needed (and including
+        # one passes a literal `--` argv that fetch-core.mjs rejects as
+        # an unknown flag).
+        run: pnpm run fetch-core --target=${{ matrix.target }}
         env:
           NEXRAY_RELEASE_FETCH: "1"
 

@@ -15,7 +15,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,17 +37,17 @@ const HASHES = {
   },
   "aarch64-apple-darwin": {
     asset: "Xray-macos-arm64-v8a.zip",
-    sha256: "REPLACE_ME_macos_arm64",
+    sha256: "9a85d80918d22fc74bbc5aefac9713ea5d20d8f522d4fd11429336015b3dbc67",
     binary: "xray",
   },
   "x86_64-pc-windows-msvc": {
     asset: "Xray-windows-64.zip",
-    sha256: "REPLACE_ME_windows_x64",
+    sha256: "802c9eff248bdb7e5154b3fbd2132c4ecf4a215b33b4dfde5166ef981765bb7b",
     binary: "xray.exe",
   },
   "x86_64-unknown-linux-gnu": {
     asset: "Xray-linux-64.zip",
-    sha256: "REPLACE_ME_linux_x64",
+    sha256: "20db837e3c33cce9a804c7d991b722a7cbd37bad4b7fc6200457f0b1c63084f2",
     binary: "xray",
   },
   "aarch64-unknown-linux-gnu": {
@@ -64,30 +64,40 @@ const HASHES = {
  * same PR.
  */
 const TUN2SOCKS_VERSION = "v2.5.2";
+// xjasonlyu/tun2socks zips ship their binary named with a platform-arch
+// suffix (`tun2socks-darwin-arm64`, `tun2socks-windows-amd64.exe`, …).
+// `extracted` records that filename; the script renames it to `binary`
+// after unzip so the Rust supervisor can resolve a stable `tun2socks`
+// (or `tun2socks.exe`) path regardless of which target it's running on.
 const TUN2SOCKS = {
   "x86_64-apple-darwin": {
     asset: "tun2socks-darwin-amd64.zip",
     sha256: "REPLACE_ME_tun2socks_macos_x64",
+    extracted: "tun2socks-darwin-amd64",
     binary: "tun2socks",
   },
   "aarch64-apple-darwin": {
     asset: "tun2socks-darwin-arm64.zip",
-    sha256: "REPLACE_ME_tun2socks_macos_arm64",
+    sha256: "b3c508a09116d5c4b63ea3b64ba54585a92ae84f3f94d73a9528b47357552da8",
+    extracted: "tun2socks-darwin-arm64",
     binary: "tun2socks",
   },
   "x86_64-pc-windows-msvc": {
     asset: "tun2socks-windows-amd64.zip",
-    sha256: "REPLACE_ME_tun2socks_windows_x64",
+    sha256: "06c71bc30e557ceab6964543bd0d68e1b9dfefa272b51a46f60171af621b5f42",
+    extracted: "tun2socks-windows-amd64.exe",
     binary: "tun2socks.exe",
   },
   "x86_64-unknown-linux-gnu": {
     asset: "tun2socks-linux-amd64.zip",
-    sha256: "REPLACE_ME_tun2socks_linux_x64",
+    sha256: "4aa7737009a9f06b9f4957c4fc12932ae0cd2039471d2ae4e5d4666ffeb40a2e",
+    extracted: "tun2socks-linux-amd64",
     binary: "tun2socks",
   },
   "aarch64-unknown-linux-gnu": {
     asset: "tun2socks-linux-arm64.zip",
     sha256: "REPLACE_ME_tun2socks_linux_arm64",
+    extracted: "tun2socks-linux-arm64",
     binary: "tun2socks",
   },
 };
@@ -103,11 +113,11 @@ const TUN2SOCKS = {
 const GEO_DATA = {
   "geoip.dat": {
     url: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-    sha256: "REPLACE_ME_geoip_dat",
+    sha256: "8aa9b4838f29eace96ec99ff971bf62cb1ff795d1cda7a210c3d5e3cb84fe2e6",
   },
   "geosite.dat": {
     url: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
-    sha256: "REPLACE_ME_geosite_dat",
+    sha256: "cf3382a05d3f124dda1f972a724a769097692e03711a4b1d3c741e6241b6d733",
   },
 };
 
@@ -235,6 +245,16 @@ async function fetchTun2socksOne(triple) {
   await writeFile(zipPath, zipBytes);
   await unzip(zipPath, targetDir);
   await rm(zipPath);
+
+  // Upstream zips name the binary with a platform-arch suffix
+  // (`tun2socks-darwin-arm64`); rename to the stable `tun2socks` /
+  // `tun2socks.exe` the Rust supervisor expects.
+  if (spec.extracted && spec.extracted !== spec.binary) {
+    const extractedPath = resolve(targetDir, spec.extracted);
+    if (existsSync(extractedPath)) {
+      await rename(extractedPath, targetBin);
+    }
+  }
 
   if (!existsSync(targetBin)) {
     throw new Error(
