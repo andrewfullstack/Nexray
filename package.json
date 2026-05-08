@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Minimal modern VLESS client (cdn-ws + reality only)",
-  "license": "GPL-3.0-only",
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "dev": "vite",

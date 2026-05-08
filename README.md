@@ -109,4 +109,9 @@ nexray/
 
 ## License
 
-GPL-3.0 — see [`LICENSE`](./LICENSE).
+Proprietary — all rights reserved. See [`LICENSE`](./LICENSE) for the full
+notice. No copying, modification, redistribution, or derivative work is
+permitted without prior written consent of the copyright holder.
+
+Bundled third-party components (xray-core, tun2socks, geoip/geosite, npm
+and Cargo dependencies) remain under their respective upstream licenses.

@@ -47,4 +47,10 @@ trigger a CI pipeline that builds installers and force-publishes them
 
 ## License
 
-GPL-3.0-only.
+Proprietary — all rights reserved. Copying, modification, redistribution,
+or derivative work is not permitted without prior written consent of the
+copyright holder. The installer binaries above are licensed for personal
+use; contact the owner for any other use case.
+
+Bundled third-party components (xray-core, tun2socks, geoip/geosite
+databases) remain under their respective upstream licenses.
