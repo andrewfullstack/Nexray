@@ -22,9 +22,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nexray — 现代 VLESS 代理客户端</title>
-<meta name="description" content="面向 macOS、Windows、Linux 的现代轻量 VLESS+REALITY / VLESS+WS+TLS / Trojan+TLS 代理客户端。">
+<meta name="description" content="面向 macOS、Windows、Linux 的现代轻量 VLESS+REALITY / VLESS+WS+TLS / Trojan+TLS / VMess+TLS 代理客户端。">
 <meta property="og:title" content="Nexray — 现代 VLESS 代理客户端">
-<meta property="og:description" content="支持 VLESS+REALITY、VLESS+WS+TLS 与 Trojan+TLS。系统托盘般简洁,内核级速度。">
+<meta property="og:description" content="支持 VLESS+REALITY、VLESS+WS+TLS、Trojan+TLS 与 VMess+TLS。系统托盘般简洁,内核级速度。">
 <meta property="og:type" content="website">
 <style>
   :root {
@@ -223,7 +223,7 @@
   <div class="brand-mark">⚡ Nexray</div>
   <div class="version-pill">${VERSION}</div>
   <h1>现代 VLESS 代理客户端。</h1>
-  <p class="tagline">支持 VLESS+REALITY、VLESS+WS+TLS 与 Trojan+TLS。系统托盘般简洁,内核级速度。</p>
+  <p class="tagline">支持 VLESS+REALITY、VLESS+WS+TLS、Trojan+TLS 与 VMess+TLS。系统托盘般简洁,内核级速度。</p>
   <div class="cta-row">
     <a id="primary-cta" class="cta cta-primary" href="#downloads">下载</a>
     <a class="cta cta-secondary" href="https://github.com/${PUBLISH_REPO}/releases">所有版本</a>
@@ -287,7 +287,7 @@
   <div class="feature-grid">
     <div class="card feature">
       <h3>仅现代协议</h3>
-      <p>VLESS(CDN-WS 或 REALITY)与 Trojan(TCP+TLS)。拒绝 VMess、Shadowsocks 以及其他任何过时或默认不安全的协议组合 — 这是设计初衷。</p>
+      <p>VLESS(CDN-WS 或 REALITY)、Trojan(TCP+TLS) 与 VMess(TCP+TLS,仅 AEAD)。拒绝 Shadowsocks、vmess/trojan 的 WebSocket 变体,以及其他任何过时或默认不安全的协议组合 — 这是设计初衷。</p>
     </div>
     <div class="card feature">
       <h3>订阅导入</h3>

@@ -2,7 +2,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md)
 
-面向 macOS、Linux、Windows 的现代轻量 VLESS + Trojan 代理客户端。
+面向 macOS、Linux、Windows 的现代轻量 VLESS + Trojan + VMess 代理客户端。
 系统托盘般简洁,内核级速度。
 
 ## 下载
@@ -38,9 +38,9 @@ sudo xattr -dr com.apple.quarantine /Applications/Nexray.app
 
 ## 核心特性
 
-- **仅现代协议。** 支持 VLESS(CDN-WS 或 REALITY)与 Trojan(TCP+TLS)。
-  拒绝 VMess、Shadowsocks 以及其他任何过时或默认不安全的协议组合 — 这是设计
-  初衷。
+- **仅现代协议。** 支持 VLESS(CDN-WS 或 REALITY)、Trojan(TCP+TLS),
+  以及 VMess(TCP+TLS,仅 AEAD)。拒绝 Shadowsocks、vmess/trojan 的
+  WebSocket 变体,以及其他任何过时或默认不安全的协议组合 — 这是设计初衷。
 - **订阅导入** + 每分组「自动」模式,持续把活动配置固定在订阅中延迟最低的
   服务器。
 - **智能分流。** 内置 `geosite:cn` 规则,叠加你自己的 `rules.conf`。国内

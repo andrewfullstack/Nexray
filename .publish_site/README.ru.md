@@ -2,7 +2,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md)
 
-Современный минималистичный VLESS + Trojan-клиент для macOS, Linux и Windows.
+Современный минималистичный VLESS + Trojan + VMess-клиент для macOS, Linux и Windows.
 Простой как иконка в трее, быстрый как ядро.
 
 ## Скачать
@@ -43,8 +43,9 @@ sudo xattr -dr com.apple.quarantine /Applications/Nexray.app
 
 ## Возможности
 
-- **Только современные протоколы.** VLESS (CDN-WS или REALITY) и Trojan
-  (TCP+TLS). Отказывается работать с VMess, Shadowsocks и любыми устаревшими
+- **Только современные протоколы.** VLESS (CDN-WS или REALITY), Trojan
+  (TCP+TLS) и VMess (TCP+TLS, только AEAD). Отказывается работать с
+  Shadowsocks, WebSocket-вариантами vmess/trojan и любыми устаревшими
   или небезопасными по умолчанию комбинациями — это сознательное решение.
 - **Импорт подписок** + переключатель «Авто» в каждой группе
   автоматически закрепляет активный сервер за самым быстрым в подписке.
