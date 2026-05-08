@@ -22,8 +22,14 @@
 //!   server's IP so xray's upstream connection doesn't loop back through
 //!   the tunnel. Falls back to direct (unprivileged) spawn — which then
 //!   surfaces the EPERM error to the user — when `pkexec` isn't installed.
-//! - **Windows** — TODO Phase 6.x: wrap with `ShellExecuteEx` `runas` verb
-//!   for the UAC prompt, or use the `windows::Win32::UI::Shell` APIs.
+//! - **Windows** — wrap the spawn in `powershell -Command "Start-Process …
+//!   -Verb RunAs -Wait"`, which triggers a UAC consent dialog. The
+//!   elevated PowerShell launcher script uses `New-NetRoute` /
+//!   `New-NetIPAddress` to bring up the Wintun adapter and install the
+//!   same split-default routing the macOS/Linux paths use, plus per-host
+//!   bypass routes. The outer (unprivileged) powershell waits on the
+//!   elevated child for the full session, so disable() can SIGTERM it to
+//!   bring everything down.
 //!
 //! The proper persistent-helper approach (`SMAppService` on macOS,
 //! `NetworkExtension` on macOS for App Store distribution, polkit policy
@@ -164,7 +170,7 @@ impl TunSupervisor {
                     let _ = std::fs::write(p, launcher_pid.to_string());
                 }
             }
-            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             SpawnedLauncher::Privileged {
                 mut child,
                 pidfile,
@@ -442,11 +448,12 @@ enum SpawnedLauncher {
     /// without an elevation strategy.
     Direct(Child),
     /// Elevated launcher: `Child` is the elevation wrapper (osascript on
-    /// macOS, pkexec on Linux), kept alive for the full session. The
-    /// launcher script writes its actually-chosen iface name to
-    /// `iface_file` (on macOS the hint may be busy so it iterates utun
-    /// numbers; on Linux this just records the hint we passed in).
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    /// macOS, pkexec on Linux, `powershell Start-Process -Verb RunAs` on
+    /// Windows), kept alive for the full session. The launcher script
+    /// writes its actually-chosen iface name to `iface_file` (on macOS the
+    /// hint may be busy so it iterates utun numbers; on Linux/Windows this
+    /// just records the hint we passed in).
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     Privileged {
         child: Child,
         pidfile: PathBuf,
@@ -484,9 +491,13 @@ fn spawn_strategy(
         }
         spawn_via_pkexec(binary, iface, socks_addr, sigfile, bypass_ips)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
     {
-        let _ = sigfile; // unused outside macOS / Linux
+        spawn_via_runas(binary, iface, socks_addr, sigfile, bypass_ips)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let _ = sigfile; // unused outside macOS / Linux / Windows
         let _ = bypass_ips;
         spawn_unprivileged(binary, iface, socks_addr).map(SpawnedLauncher::Direct)
     }
@@ -658,6 +669,96 @@ fn pkexec_available() -> bool {
         }
     }
     false
+}
+
+/// Windows-only: wrap the launcher in `powershell -Command Start-Process
+/// powershell -Verb RunAs -Wait`. The outer powershell waits on the
+/// elevated child for the full session, so the supervisor's existing
+/// `child.kill()` on disable() also tears down the elevated process via
+/// the launcher's parent-pid watchdog. UAC consents once per session.
+///
+/// Quoting note: the inner argument list for `Start-Process -ArgumentList`
+/// is a PowerShell array literal; each element is wrapped in single
+/// quotes and any embedded single quote is doubled. We deliberately use
+/// `'@(...)` over a single-string ArgumentList because PowerShell's
+/// command-line splitter has subtle differences from Win32's
+/// CommandLineToArgvW that break paths containing spaces.
+#[cfg(target_os = "windows")]
+fn spawn_via_runas(
+    binary: &Path,
+    iface: &str,
+    socks_addr: &str,
+    sigfile: &Path,
+    bypass_ips: &[String],
+) -> std::io::Result<SpawnedLauncher> {
+    let nonce = now_ms();
+    let tmp = std::env::temp_dir();
+    let script_path = tmp.join(format!("nexray-tun-launcher-{nonce}.ps1"));
+    let log_path = tmp.join(format!("nexray-tun-{nonce}.log"));
+    let pidfile_path = tmp.join(format!("nexray-tun-{nonce}.pid"));
+    let iface_file = tmp.join(format!("nexray-tun-{nonce}.iface"));
+    let script = build_launcher_script_windows(LauncherPaths {
+        log: &log_path,
+        pidfile: &pidfile_path,
+        sigfile,
+        binary,
+        iface,
+        socks_addr,
+        bypass_ips,
+        iface_file: &iface_file,
+        parent_pid: std::process::id(),
+    });
+    std::fs::write(&script_path, script)?;
+
+    // PowerShell single-quoted strings only need ' → '' escaping; no
+    // backslash dance. Build the inner Start-Process invocation as a
+    // single command string passed via `-Command` to the outer
+    // powershell.
+    let q = ps_single_quote(&script_path.display().to_string());
+    let outer_cmd = format!(
+        "Start-Process -FilePath 'powershell.exe' \
+         -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',{q}) \
+         -Verb RunAs -Wait -WindowStyle Hidden"
+    );
+
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        &outer_cmd,
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    let child = cmd.spawn()?;
+    Ok(SpawnedLauncher::Privileged {
+        child,
+        pidfile: pidfile_path,
+        log_path,
+        iface_file,
+    })
+}
+
+/// PowerShell single-quote escape: doubled single quotes are the only
+/// special character inside a single-quoted PowerShell literal.
+#[cfg(target_os = "windows")]
+fn ps_single_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push('\'');
+            out.push('\'');
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 /// Inputs to `build_launcher_script_*`. Bundled so the call site is self-
@@ -1053,10 +1154,230 @@ pub fn build_launcher_script_linux(p: LauncherPaths<'_>) -> String {
     )
 }
 
+/// Windows equivalent of `build_launcher_script_macos` /
+/// `build_launcher_script_linux`. Same FSM — pidfile + sigfile +
+/// parent-pid watch + cooperative teardown — but emitted as a PowerShell
+/// `.ps1`. Uses `Get-NetRoute` / `New-NetIPAddress` / `New-NetRoute` to
+/// install split-default routing on the Wintun adapter that tun2socks
+/// creates, plus per-host bypass routes so xray's upstream connection
+/// escapes the tunnel. Errors are swallowed via
+/// `-ErrorAction SilentlyContinue` because some entries may already be
+/// gone by teardown time (the device disappears with tun2socks).
+#[doc(hidden)]
+#[cfg(target_os = "windows")]
+pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
+    // Same defensive whitelist as the macOS/Linux path. `:` for IPv6,
+    // `.` for IPv4. PowerShell will split the resulting space-separated
+    // string back into an array.
+    let bypass_list = p
+        .bypass_ips
+        .iter()
+        .filter(|ip| {
+            ip.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == ':')
+        })
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // PowerShell paths get embedded as single-quoted literals; double
+    // any embedded single quotes per PS rules.
+    let q = |path: &Path| -> String { ps_single_quote_static(&path.display().to_string()) };
+
+    format!(
+        "$ErrorActionPreference = 'Continue'\n\
+         $LOG = {log}\n\
+         $PIDFILE = {pid}\n\
+         $SIGFILE = {sig}\n\
+         $IFACE_FILE = {iface_file}\n\
+         $BIN = {bin}\n\
+         $IFACE_HINT = '{iface}'\n\
+         $PROXY = 'socks5://{socks}'\n\
+         $BYPASS_IPS_RAW = '{bypass}'\n\
+         $PARENT_PID = {parent_pid}\n\
+         $TUN_IP = '198.18.0.1'\n\
+         \n\
+         '' | Out-File -FilePath $LOG -Encoding ASCII\n\
+         \n\
+         # Wintun adapter naming is unconstrained — use the hint as-is.\n\
+         $IFACE = $IFACE_HINT\n\
+         $IFACE | Out-File -FilePath $IFACE_FILE -Encoding ASCII\n\
+         \n\
+         '--- nexray-tun launcher diag (windows) ---' | Add-Content $LOG\n\
+         \"date: $(Get-Date)\" | Add-Content $LOG\n\
+         \"user: $(whoami)\" | Add-Content $LOG\n\
+         \"pid: $PID  parent: $PARENT_PID\" | Add-Content $LOG\n\
+         \"BIN: $BIN\" | Add-Content $LOG\n\
+         \"IFACE: $IFACE  TUN_IP: $TUN_IP\" | Add-Content $LOG\n\
+         \"BYPASS_IPS: $BYPASS_IPS_RAW\" | Add-Content $LOG\n\
+         \n\
+         # Snapshot the original default gateway+iface BEFORE we touch\n\
+         # routing, so bypass routes can escape the tunnel and we can\n\
+         # restore prior state on teardown.\n\
+         $DefRoute4 = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | \
+             Sort-Object -Property RouteMetric | Select-Object -First 1\n\
+         $LOCAL_GW  = if ($DefRoute4) {{ $DefRoute4.NextHop }} else {{ '' }}\n\
+         $LOCAL_IDX = if ($DefRoute4) {{ $DefRoute4.ifIndex }} else {{ $null }}\n\
+         $DefRoute6 = Get-NetRoute -DestinationPrefix '::/0' -ErrorAction SilentlyContinue | \
+             Sort-Object -Property RouteMetric | Select-Object -First 1\n\
+         $LOCAL_GW6  = if ($DefRoute6) {{ $DefRoute6.NextHop }} else {{ '' }}\n\
+         $LOCAL_IDX6 = if ($DefRoute6) {{ $DefRoute6.ifIndex }} else {{ $null }}\n\
+         \"LOCAL_GW=$LOCAL_GW IDX=$LOCAL_IDX  LOCAL_GW6=$LOCAL_GW6 IDX6=$LOCAL_IDX6\" | Add-Content $LOG\n\
+         '--- tun2socks output below ---' | Add-Content $LOG\n\
+         \n\
+         # Spawn tun2socks. Start-Process -PassThru returns the child\n\
+         # process so we can capture its PID and wait on it later.\n\
+         $proc = Start-Process -FilePath $BIN \\\n\
+           -ArgumentList @('-device', $IFACE, '-proxy', $PROXY, '-loglevel', 'warn') \\\n\
+           -RedirectStandardOutput $LOG -RedirectStandardError $LOG \\\n\
+           -WindowStyle Hidden -PassThru\n\
+         $TUN_PID = $proc.Id\n\
+         \"$TUN_PID\" | Out-File -FilePath $PIDFILE -Encoding ASCII\n\
+         \"tun2socks spawned with pid=$TUN_PID\" | Add-Content $LOG\n\
+         \n\
+         # Wait for Wintun to instantiate the adapter under the chosen\n\
+         # name. Iterate so we don't race tun2socks on slow systems.\n\
+         $Adapter = $null\n\
+         for ($i = 0; $i -lt 25; $i++) {{\n\
+           $Adapter = Get-NetAdapter -Name $IFACE -ErrorAction SilentlyContinue\n\
+           if ($Adapter) {{ break }}\n\
+           Start-Sleep -Milliseconds 200\n\
+         }}\n\
+         \n\
+         if ($Adapter) {{\n\
+           $TUN_IDX = $Adapter.ifIndex\n\
+           \"adapter index: $TUN_IDX\" | Add-Content $LOG\n\
+           \n\
+           # Bring up + assign IPv4 + IPv6 ULA addresses.\n\
+           Set-NetIPInterface -InterfaceIndex $TUN_IDX -InterfaceMetric 1 -ErrorAction SilentlyContinue\n\
+           New-NetIPAddress -InterfaceIndex $TUN_IDX -IPAddress $TUN_IP -PrefixLength 30 \\\n\
+             -ErrorAction SilentlyContinue | Out-Null\n\
+           \"New-NetIPAddress $TUN_IP/30 idx=$TUN_IDX\" | Add-Content $LOG\n\
+           \n\
+           # Bypass routes: each proxy-server IP must reach the network\n\
+           # via the ORIGINAL default gateway, otherwise xray's upstream\n\
+           # connection would loop back into the tunnel forever.\n\
+           foreach ($IP in ($BYPASS_IPS_RAW -split ' ')) {{\n\
+             if ($IP -eq '') {{ continue }}\n\
+             if ($IP -match ':') {{\n\
+               if ($LOCAL_IDX6 -and $LOCAL_GW6) {{\n\
+                 New-NetRoute -DestinationPrefix \"$IP/128\" -InterfaceIndex $LOCAL_IDX6 \\\n\
+                   -NextHop $LOCAL_GW6 -ErrorAction SilentlyContinue | Out-Null\n\
+                 \"bypass v6: $IP -> $LOCAL_GW6 (idx $LOCAL_IDX6)\" | Add-Content $LOG\n\
+               }}\n\
+             }} else {{\n\
+               if ($LOCAL_IDX -and $LOCAL_GW) {{\n\
+                 New-NetRoute -DestinationPrefix \"$IP/32\" -InterfaceIndex $LOCAL_IDX \\\n\
+                   -NextHop $LOCAL_GW -ErrorAction SilentlyContinue | Out-Null\n\
+                 \"bypass v4: $IP -> $LOCAL_GW (idx $LOCAL_IDX)\" | Add-Content $LOG\n\
+               }}\n\
+             }}\n\
+           }}\n\
+           \n\
+           # Split-default trick: 0/1 + 128/1 beat the existing default\n\
+           # by specificity. NextHop is unset → routes are interface-scoped.\n\
+           New-NetRoute -DestinationPrefix '0.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+             -NextHop $TUN_IP -ErrorAction SilentlyContinue | Out-Null\n\
+           New-NetRoute -DestinationPrefix '128.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+             -NextHop $TUN_IP -ErrorAction SilentlyContinue | Out-Null\n\
+           New-NetRoute -DestinationPrefix '::/1' -InterfaceIndex $TUN_IDX \\\n\
+             -ErrorAction SilentlyContinue | Out-Null\n\
+           New-NetRoute -DestinationPrefix '8000::/1' -InterfaceIndex $TUN_IDX \\\n\
+             -ErrorAction SilentlyContinue | Out-Null\n\
+           \"split-default routes installed via $IFACE (idx $TUN_IDX)\" | Add-Content $LOG\n\
+         }} else {{\n\
+           'WARN: Wintun adapter never appeared; skipping route setup' | Add-Content $LOG\n\
+         }}\n\
+         \n\
+         # Cooperative shutdown loop. Polls every 0.3s for either:\n\
+         #   1. sigfile present → user clicked Stop TUN cleanly\n\
+         #   2. parent (nexray) PID dead → app force-quit / Ctrl+C / crashed\n\
+         #   3. tun2socks itself exited\n\
+         $REASON = ''\n\
+         while ($true) {{\n\
+           if (-not (Get-Process -Id $TUN_PID -ErrorAction SilentlyContinue)) {{\n\
+             $REASON = 'tun2socks_exited'; break\n\
+           }}\n\
+           if (Test-Path $SIGFILE) {{\n\
+             Remove-Item -Force $SIGFILE -ErrorAction SilentlyContinue\n\
+             $REASON = 'sigfile'; break\n\
+           }}\n\
+           if (-not (Get-Process -Id $PARENT_PID -ErrorAction SilentlyContinue)) {{\n\
+             $REASON = 'parent_died'; break\n\
+           }}\n\
+           Start-Sleep -Milliseconds 300\n\
+         }}\n\
+         \"shutdown trigger: $REASON\" | Add-Content $LOG\n\
+         \n\
+         if ($REASON -eq 'sigfile' -or $REASON -eq 'parent_died') {{\n\
+           Stop-Process -Id $TUN_PID -Force -ErrorAction SilentlyContinue\n\
+           Start-Sleep -Seconds 1\n\
+         }}\n\
+         Wait-Process -Id $TUN_PID -ErrorAction SilentlyContinue\n\
+         'tun2socks exited' | Add-Content $LOG\n\
+         \n\
+         # Tear down everything we installed. Errors swallowed because\n\
+         # the Wintun adapter typically vanishes with tun2socks, taking\n\
+         # its routes with it.\n\
+         if ($Adapter) {{\n\
+           Remove-NetRoute -DestinationPrefix '0.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+             -Confirm:$false -ErrorAction SilentlyContinue\n\
+           Remove-NetRoute -DestinationPrefix '128.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+             -Confirm:$false -ErrorAction SilentlyContinue\n\
+           Remove-NetRoute -DestinationPrefix '::/1' -InterfaceIndex $TUN_IDX \\\n\
+             -Confirm:$false -ErrorAction SilentlyContinue\n\
+           Remove-NetRoute -DestinationPrefix '8000::/1' -InterfaceIndex $TUN_IDX \\\n\
+             -Confirm:$false -ErrorAction SilentlyContinue\n\
+         }}\n\
+         foreach ($IP in ($BYPASS_IPS_RAW -split ' ')) {{\n\
+           if ($IP -eq '') {{ continue }}\n\
+           if ($IP -match ':') {{\n\
+             Remove-NetRoute -DestinationPrefix \"$IP/128\" -Confirm:$false -ErrorAction SilentlyContinue\n\
+           }} else {{\n\
+             Remove-NetRoute -DestinationPrefix \"$IP/32\" -Confirm:$false -ErrorAction SilentlyContinue\n\
+           }}\n\
+         }}\n\
+         'routing torn down' | Add-Content $LOG\n\
+         \n\
+         Remove-Item -Force $PIDFILE -ErrorAction SilentlyContinue\n\
+         Remove-Item -Force $IFACE_FILE -ErrorAction SilentlyContinue\n\
+         exit 0\n",
+        log = q(p.log),
+        pid = q(p.pidfile),
+        sig = q(p.sigfile),
+        iface_file = q(p.iface_file),
+        bin = q(p.binary),
+        iface = p.iface,
+        socks = p.socks_addr,
+        bypass = bypass_list,
+        parent_pid = p.parent_pid,
+    )
+}
+
+/// Free-function variant of `ps_single_quote` that's available on every
+/// platform (so `build_launcher_script_windows` can be tested cross-OS
+/// without the cfg gate around `ps_single_quote` excluding it). The two
+/// functions intentionally have the same body.
+#[cfg(target_os = "windows")]
+fn ps_single_quote_static(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push('\'');
+            out.push('\'');
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
 /// Tail the per-session log file, feeding lines through the same sticky-
 /// error pipeline as `drain_lines`. Stops when the pidfile vanishes (the
 /// launcher's exit signal) or when EOF + 1s passes with no new data.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn tail_log(log_path: &Path, pidfile_path: &Path, inner_arc: Arc<Mutex<Inner>>) {
     use std::fs::File;
     use std::io::{BufRead, BufReader, Seek};
