@@ -264,7 +264,20 @@ jobs:
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "release $TAG already exists on $REPO — clobbering assets in place"
             gh release upload "$TAG" --repo "$REPO" --clobber ./downloaded/*
-            gh release edit "$TAG" --repo "$REPO" --notes-file ./release-notes.md
+            # `gh release edit` can fail with HTTP 422 "Release.target_commitish is invalid"
+            # when the pre-existing release was anchored to a commit that's
+            # since been orphaned (e.g. force-pushed branch on the public repo,
+            # legacy artefacts from before this CI was rebuilt). Fall back to
+            # a `gh api` PATCH that ONLY touches `body` so target_commitish is
+            # left alone. As a last resort just warn — the assets are what
+            # actually matter for end users.
+            if ! gh release edit "$TAG" --repo "$REPO" --notes-file ./release-notes.md 2>/dev/null; then
+              RELEASE_ID=$(gh release view "$TAG" --repo "$REPO" --json id --jq .id)
+              if ! gh api -X PATCH "/repos/$REPO/releases/$RELEASE_ID" \
+                    -f body="$(cat ./release-notes.md)" >/dev/null; then
+                echo "::warning::release notes refresh failed for $TAG — assets were uploaded successfully, only the description text is stale"
+              fi
+            fi
           else
             echo "creating fresh draft release $TAG on $REPO"
             gh release create "$TAG" \
