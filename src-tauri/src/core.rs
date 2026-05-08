@@ -424,9 +424,18 @@ const PROBE_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 /// (probe fails within deadline). Runs in its own thread; bails immediately
 /// if the user disconnects or `status()` flips state to Crashed mid-probe.
 fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
+    tracing::info!(
+        target: "xray-probe",
+        "starting health probe via socks5h://127.0.0.1:{socks_port} (deadline={}s, targets={})",
+        PROBE_DEADLINE.as_secs(),
+        PROBE_URLS.len()
+    );
     let proxy = match reqwest::Proxy::all(format!("socks5h://127.0.0.1:{socks_port}")) {
         Ok(p) => p,
-        Err(e) => return finalize_probe(&inner, Err(format!("proxy init: {e}"))),
+        Err(e) => {
+            tracing::warn!(target: "xray-probe", "proxy init failed: {e}");
+            return finalize_probe(&inner, Err(format!("proxy init: {e}")));
+        }
     };
     let client = match reqwest::blocking::Client::builder()
         .proxy(proxy)
@@ -435,16 +444,21 @@ fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
         .build()
     {
         Ok(c) => c,
-        Err(e) => return finalize_probe(&inner, Err(format!("client init: {e}"))),
+        Err(e) => {
+            tracing::warn!(target: "xray-probe", "client init failed: {e}");
+            return finalize_probe(&inner, Err(format!("client init: {e}")));
+        }
     };
 
     let deadline = Instant::now() + PROBE_DEADLINE;
     let mut last_err = String::from("(no attempts)");
+    let mut attempt = 0u32;
 
     'cycle: loop {
         // Bail if the user disconnected or the supervisor caught a process
         // exit and flipped to Crashed: in either case our verdict isn't wanted.
         if !matches!(lock(&inner).state, ConnectionState::Connecting) {
+            tracing::info!(target: "xray-probe", "state no longer Connecting — probe bailing");
             return;
         }
         if Instant::now() > deadline {
@@ -468,14 +482,26 @@ fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
         // the proxy works. So 404 is a pass; only network/auth/TLS
         // errors fail.
         for url in PROBE_URLS {
+            attempt += 1;
             // Re-check liveness between targets — disconnects shouldn't
             // wait until the full cycle finishes.
             if !matches!(lock(&inner).state, ConnectionState::Connecting) {
+                tracing::info!(target: "xray-probe", "state no longer Connecting — probe bailing");
                 return;
             }
             match client.head(*url).send() {
-                Ok(_) => return finalize_probe(&inner, Ok(())),
-                Err(e) => last_err = format!("{url}: {e}"),
+                Ok(res) => {
+                    tracing::info!(
+                        target: "xray-probe",
+                        "attempt {attempt}: {url} → {} (proxy chain works)",
+                        res.status()
+                    );
+                    return finalize_probe(&inner, Ok(()));
+                }
+                Err(e) => {
+                    tracing::warn!(target: "xray-probe", "attempt {attempt}: {url} → {e}");
+                    last_err = format!("{url}: {e}");
+                }
             }
             if Instant::now() > deadline {
                 break 'cycle;
