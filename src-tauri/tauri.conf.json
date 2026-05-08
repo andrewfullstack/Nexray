@@ -47,7 +47,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "category": "Network",
+    "category": "Utility",
     "shortDescription": "Minimal modern VLESS client",
     "longDescription": "Cross-platform proxy client. Two profiles only: cdn-ws (VLESS+WS+TLS via CDN) and reality (VLESS+Vision+REALITY). Refuses VMess, Shadowsocks, Trojan, and every other legacy or insecure-by-default combination.",
     "macOS": {
