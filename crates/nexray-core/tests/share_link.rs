@@ -3,6 +3,7 @@
 
 mod fixtures;
 
+use base64::Engine;
 use fixtures::*;
 use nexray_core::{decode_share_link, encode_share_link, DecodeResult, Profile, SkipReason};
 
@@ -64,19 +65,56 @@ fn accepts_clean_trojan() {
 }
 
 #[test]
+fn accepts_clean_vmess() {
+    let Profile::Vmess(p) = expect_ok(VALID_VMESS) else {
+        panic!("expected vmess variant");
+    };
+    assert_eq!(p.address, "198.51.100.77");
+    assert_eq!(p.port, 443);
+    assert_eq!(p.uuid, "550e8400-e29b-41d4-a716-446655440042");
+    assert_eq!(p.sni, "vmess.example.com");
+    assert_eq!(p.alpn.len(), 2);
+    assert_eq!(p.remark.as_deref(), Some("VMess-VPS"));
+}
+
+#[test]
 fn rejects_trojan_with_allow_insecure() {
     let raw = "trojan://pwd@1.2.3.4:443?type=tcp&sni=x.example.com&allowInsecure=1";
     assert_eq!(expect_err(raw), SkipReason::Malformed);
 }
 
 #[test]
+fn rejects_vmess_with_alter_id_nonzero() {
+    // aid=1 forces the legacy MD5 auth path — xray-core no longer supports it.
+    let json = serde_json::json!({
+        "v": "2",
+        "add": "x.example.com",
+        "port": 443,
+        "id": "550e8400-e29b-41d4-a716-446655440044",
+        "aid": 1,
+        "scy": "auto",
+        "net": "tcp",
+        "type": "none",
+        "tls": "tls",
+        "sni": "x.example.com",
+        "alpn": "h2",
+        "fp": "chrome",
+    });
+    let raw = format!(
+        "vmess://{}",
+        base64::engine::general_purpose::STANDARD.encode(json.to_string().as_bytes())
+    );
+    assert_eq!(expect_err(&raw), SkipReason::Malformed);
+}
+
+#[test]
 fn rejects_legacy_and_invalid_combinations() {
     let cases: &[(&str, SkipReason)] = &[
-        (VMESS_LINK, SkipReason::VmessLegacy),
         (SS_LINK, SkipReason::ShadowsocksLegacy),
         (SSR_LINK, SkipReason::ShadowsocksLegacy),
         (TROJAN_GO_LINK, SkipReason::TrojanGoLegacy),
         (TROJAN_WS_LINK, SkipReason::TrojanWs),
+        (VMESS_WS_LINK, SkipReason::VmessWs),
         (HTTP_LINK, SkipReason::HttpUnsupported),
         (SOCKS_LINK, SkipReason::SocksUnsupported),
         (REALITY_WS, SkipReason::RealityWs),
@@ -120,6 +158,18 @@ fn trojan_round_trips() {
     assert!(
         encoded.starts_with("trojan://"),
         "expected trojan:// scheme, got {encoded}"
+    );
+    let re = expect_ok(&encoded);
+    assert_eq!(format!("{:?}", original), format!("{:?}", re));
+}
+
+#[test]
+fn vmess_round_trips() {
+    let original = expect_ok(VALID_VMESS);
+    let encoded = encode_share_link(&original);
+    assert!(
+        encoded.starts_with("vmess://"),
+        "expected vmess:// scheme, got {encoded}"
     );
     let re = expect_ok(&encoded);
     assert_eq!(format!("{:?}", original), format!("{:?}", re));

@@ -42,12 +42,13 @@ describe.skipIf(!cargoAvailable)("nexray-cli --json ↔ Zod schema", () => {
 
     const parsed = ClassifyResultSchema.parse(JSON.parse(stdout));
 
-    expect(parsed.accepted).toHaveLength(3);
+    expect(parsed.accepted).toHaveLength(4);
     expect(parsed.skipped).toHaveLength(9);
     expect(parsed.accepted.map((p) => p.kind).sort()).toEqual([
       "cdn-ws",
       "reality",
       "trojan",
+      "vmess",
     ]);
 
     const cdnWs = parsed.accepted.find((p) => p.kind === "cdn-ws");
@@ -74,6 +75,16 @@ describe.skipIf(!cargoAvailable)("nexray-cli --json ↔ Zod schema", () => {
       expect(trojan.port).toBe(443);
       expect(trojan.password).toBe("secret-pwd");
       expect(trojan.sni).toBe("trojan.example.com");
+    }
+
+    const vmess = parsed.accepted.find((p) => p.kind === "vmess");
+    expect(vmess).toBeDefined();
+    if (vmess?.kind === "vmess") {
+      expect(vmess.address).toBe("198.51.100.77");
+      expect(vmess.port).toBe(443);
+      expect(vmess.uuid).toBe("550e8400-e29b-41d4-a716-446655440042");
+      expect(vmess.security).toBe("auto");
+      expect(vmess.sni).toBe("vmess.example.com");
     }
   }, 120_000);
 });

@@ -33,6 +33,22 @@ const TrojanPasswordSchema = z
   .min(1, "Trojan password required")
   .max(256, "Trojan password too long");
 
+/**
+ * VMess `security` (cipher) values accepted by xray-core. `auto` is the
+ * v2rayN default (AES-128-GCM on AES-NI hosts, ChaCha20-Poly1305 elsewhere).
+ * Legacy non-AEAD ciphers (`aes-128-cfb`, `tls`, etc.) are intentionally
+ * absent — those required `alterId>0`, which xray-core no longer supports.
+ */
+export const VMESS_SECURITIES = [
+  "auto",
+  "none",
+  "aes-128-gcm",
+  "chacha20-poly1305",
+  "zero",
+] as const;
+export const VmessSecuritySchema = z.enum(VMESS_SECURITIES);
+export type VmessSecurity = z.infer<typeof VmessSecuritySchema>;
+
 // reality publicKey is a Curve25519 key serialized as 43 base64url characters
 // (32 bytes, no padding). Some servers emit 44 chars with a trailing '='.
 const RealityPublicKeySchema = z
@@ -167,10 +183,54 @@ export const TrojanProfileSchema = z
 
 export type TrojanProfile = z.infer<typeof TrojanProfileSchema>;
 
+/**
+ * `vmess`: VMess over raw TCP + TLS. The full JSON-blob format defined by
+ * the v2rayN community (`vmess://<base64(json)>`); we restrict the accepted
+ * subset to TCP+TLS+AEAD (`alterId=0`). Header obfuscation (`type: "http"`,
+ * `kcp`, `quic`, etc.) is rejected at parse time.
+ *
+ * Field mapping (this profile -> xray outbound shape):
+ *   address    -> settings.vnext[0].address
+ *   port       -> settings.vnext[0].port
+ *   uuid       -> settings.vnext[0].users[0].id
+ *   security   -> settings.vnext[0].users[0].security  (cipher; alterId pinned to 0)
+ *   sni        -> streamSettings.tlsSettings.serverName
+ *   alpn       -> streamSettings.tlsSettings.alpn
+ *   fingerprint-> streamSettings.tlsSettings.fingerprint
+ *
+ * Hard rules:
+ *   - Transport is pinned to TCP. WebSocket variants are rejected at parse
+ *     time with `vmess+ws (unsupported)`.
+ *   - `alterId` must be 0 (AEAD format). Legacy MD5 auth is unreachable on
+ *     modern xray-core.
+ *   - allowInsecure is never accepted. The materializer always emits
+ *     `allowInsecure: false`.
+ */
+export const VmessProfileSchema = z
+  .object({
+    kind: z.literal("vmess"),
+    id: z.string().min(1, "profile id required"),
+    name: z.string().min(1).max(64),
+    remark: z.string().max(128).optional(),
+
+    address: z.string().min(1),
+    port: PortSchema,
+    uuid: UuidSchema,
+    security: VmessSecuritySchema.default("auto"),
+
+    sni: z.string().min(1, "TLS SNI required"),
+    alpn: AlpnSchema.default(["h2", "http/1.1"]),
+    fingerprint: FingerprintSchema.default("chrome"),
+  })
+  .strict();
+
+export type VmessProfile = z.infer<typeof VmessProfileSchema>;
+
 export const ProfileSchema = z.discriminatedUnion("kind", [
   CdnWsProfileSchema,
   RealityProfileSchema,
   TrojanProfileSchema,
+  VmessProfileSchema,
 ]);
 export type Profile = z.infer<typeof ProfileSchema>;
 
@@ -178,13 +238,15 @@ export type Profile = z.infer<typeof ProfileSchema>;
 
 /** The well-known reasons emitted by the subscription classifier. */
 export const SKIP_REASONS = [
-  "vmess (legacy)",
   "shadowsocks (legacy)",
   // trojan-go is a separate protocol from upstream Trojan and intentionally
   // unsupported. Plain `trojan://` over TCP+TLS IS supported and produces
   // an accepted Profile, so it does NOT appear in this list.
   "trojan-go (legacy)",
   "trojan+ws (unsupported)",
+  // Plain `vmess://` over TCP+TLS+AEAD IS supported and produces an
+  // accepted Profile. Only the WebSocket variant is rejected here.
+  "vmess+ws (unsupported)",
   "http (unsupported as outbound)",
   "socks (unsupported as outbound)",
   "reality+ws (invalid combination)",

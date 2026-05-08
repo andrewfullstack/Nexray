@@ -176,6 +176,13 @@ fn profile_row(profile: &Profile) -> Row {
             sni: p.sni.clone(),
             fingerprint: fingerprint_str(p.fingerprint),
         },
+        Profile::Vmess(p) => Row {
+            kind: "vmess",
+            name: truncate(&p.name, 26),
+            endpoint: format!("{}:{}", p.address, p.port),
+            sni: p.sni.clone(),
+            fingerprint: fingerprint_str(p.fingerprint),
+        },
     }
 }
 

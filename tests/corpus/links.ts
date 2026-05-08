@@ -26,10 +26,18 @@ export const VALID_TROJAN =
   "&alpn=h2%2Chttp%2F1.1" +
   "#Trojan-VPS";
 
-// Legacy -- rejected at the protocol prefix --------------------------------
+// VMess base64-JSON: { v=2, add=198.51.100.77, port=443,
+// id=550e8400-...0042, aid=0, scy=auto, net=tcp, type=none, tls=tls,
+// sni=vmess.example.com, alpn=h2,http/1.1, fp=chrome, ps=VMess-VPS }.
+export const VALID_VMESS =
+  "vmess://eyJ2IjoiMiIsInBzIjoiVk1lc3MtVlBTIiwiYWRkIjoiMTk4LjUxLjEw" +
+  "MC43NyIsInBvcnQiOjQ0MywiaWQiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00" +
+  "NDY2NTU0NDAwNDIiLCJhaWQiOjAsInNjeSI6ImF1dG8iLCJuZXQiOiJ0Y3AiLCJ0" +
+  "eXBlIjoibm9uZSIsImhvc3QiOiIiLCJwYXRoIjoiIiwidGxzIjoidGxzIiwic25p" +
+  "Ijoidm1lc3MuZXhhbXBsZS5jb20iLCJhbHBuIjoiaDIsaHR0cC8xLjEiLCJmcCI6" +
+  "ImNocm9tZSJ9";
 
-export const VMESS_LINK =
-  "vmess://eyJ2IjoiMiIsInBzIjoidm0iLCJhZGQiOiJleGFtcGxlLmNvbSJ9";
+// Legacy -- rejected at the protocol prefix --------------------------------
 
 export const SS_LINK = "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@1.2.3.4:8388#legacy";
 
@@ -43,6 +51,15 @@ export const TROJAN_WS_LINK =
   "trojan://password@cdn.example.com:443" +
   "?type=ws&security=tls&host=cdn.example.com&path=%2Ftrojan&sni=cdn.example.com" +
   "#Trojan-WS";
+
+// VMess+WebSocket is rejected — Phase-7 scope is TCP+TLS only.
+export const VMESS_WS_LINK =
+  "vmess://eyJ2IjoiMiIsInBzIjoiVk1lc3MtV1MiLCJhZGQiOiJjZG4uZXhhbXBs" +
+  "ZS5jb20iLCJwb3J0Ijo0NDMsImlkIjoiNTUwZTg0MDAtZTI5Yi00MWQ0LWE3MTYt" +
+  "NDQ2NjU1NDQwMDQzIiwiYWlkIjowLCJzY3kiOiJhdXRvIiwibmV0Ijoid3MiLCJ0" +
+  "eXBlIjoibm9uZSIsImhvc3QiOiJjZG4uZXhhbXBsZS5jb20iLCJwYXRoIjoiL3Zt" +
+  "ZXNzIiwidGxzIjoidGxzIiwic25pIjoiY2RuLmV4YW1wbGUuY29tIiwiYWxwbiI6" +
+  "ImgyLGh0dHAvMS4xIiwiZnAiOiJjaHJvbWUifQ==";
 
 export const HTTP_LINK = "http://proxy.example.com:8080#nope";
 
@@ -87,12 +104,13 @@ export const REALITY_BAD_PBK =
 
 export const MIXED_PLAIN_SUB = [
   VALID_CDN_WS,
-  VMESS_LINK,
   VALID_REALITY,
-  SS_LINK,
   VALID_TROJAN,
+  VALID_VMESS,
+  SS_LINK,
   TROJAN_GO_LINK,
   TROJAN_WS_LINK,
+  VMESS_WS_LINK,
   REALITY_GRPC,
   REALITY_WS,
   VLESS_TLS_DIRECT,

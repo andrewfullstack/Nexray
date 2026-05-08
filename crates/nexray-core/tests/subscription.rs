@@ -11,7 +11,7 @@ use nexray_core::{classify_subscription, summarize_skipped, Profile, SkipReason}
 fn classifies_mixed_plaintext_list() {
     let body = mixed_plain_sub();
     let r = classify_subscription(&body);
-    assert_eq!(r.accepted.len(), 3);
+    assert_eq!(r.accepted.len(), 4);
     let kinds: std::collections::BTreeSet<&str> = r
         .accepted
         .iter()
@@ -19,21 +19,23 @@ fn classifies_mixed_plaintext_list() {
             Profile::CdnWs(_) => "cdn-ws",
             Profile::Reality(_) => "reality",
             Profile::Trojan(_) => "trojan",
+            Profile::Vmess(_) => "vmess",
         })
         .collect();
     assert!(kinds.contains("cdn-ws"));
     assert!(kinds.contains("reality"));
     assert!(kinds.contains("trojan"));
+    assert!(kinds.contains("vmess"));
 
     assert_eq!(r.skipped.len(), 9);
     let mut counts = std::collections::HashMap::new();
     for s in &r.skipped {
         *counts.entry(s.reason).or_insert(0_usize) += 1;
     }
-    assert_eq!(counts.get(&SkipReason::VmessLegacy), Some(&1));
     assert_eq!(counts.get(&SkipReason::ShadowsocksLegacy), Some(&1));
     assert_eq!(counts.get(&SkipReason::TrojanGoLegacy), Some(&1));
     assert_eq!(counts.get(&SkipReason::TrojanWs), Some(&1));
+    assert_eq!(counts.get(&SkipReason::VmessWs), Some(&1));
     assert_eq!(counts.get(&SkipReason::RealityGrpc), Some(&1));
     assert_eq!(counts.get(&SkipReason::RealityWs), Some(&1));
     assert_eq!(counts.get(&SkipReason::VlessTlsDirect), Some(&1));
@@ -81,10 +83,10 @@ fn summary_matches_development_md_shape() {
     let r = classify_subscription(&mixed_plain_sub());
     let s = summarize_skipped(&r.skipped);
     assert!(s.starts_with("9 servers skipped: "), "got: {s}");
-    assert!(s.contains("1 vmess (legacy)"));
     assert!(s.contains("1 shadowsocks (legacy)"));
     assert!(s.contains("1 trojan-go (legacy)"));
     assert!(s.contains("1 trojan+ws (unsupported)"));
+    assert!(s.contains("1 vmess+ws (unsupported)"));
 }
 
 #[test]

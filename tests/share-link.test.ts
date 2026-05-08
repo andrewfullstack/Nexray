@@ -15,9 +15,10 @@ import {
   VALID_CDN_WS,
   VALID_REALITY,
   VALID_TROJAN,
+  VALID_VMESS,
   VLESS_KCP,
   VLESS_TLS_DIRECT,
-  VMESS_LINK,
+  VMESS_WS_LINK,
 } from "./corpus/links";
 
 describe("decodeShareLink", () => {
@@ -65,6 +66,22 @@ describe("decodeShareLink", () => {
     expect(r.profile.remark).toBe("Trojan-VPS");
   });
 
+  it("accepts a clean vmess link", () => {
+    const r = decodeShareLink(VALID_VMESS);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.profile.kind).toBe("vmess");
+    if (r.profile.kind !== "vmess") return;
+    expect(r.profile.address).toBe("198.51.100.77");
+    expect(r.profile.port).toBe(443);
+    expect(r.profile.uuid).toBe("550e8400-e29b-41d4-a716-446655440042");
+    expect(r.profile.security).toBe("auto");
+    expect(r.profile.sni).toBe("vmess.example.com");
+    expect(r.profile.fingerprint).toBe("chrome");
+    expect(r.profile.alpn).toEqual(["h2", "http/1.1"]);
+    expect(r.profile.remark).toBe("VMess-VPS");
+  });
+
   it("rejects a trojan link that asks for allowInsecure=1", () => {
     const r = decodeShareLink(
       "trojan://pwd@1.2.3.4:443?type=tcp&sni=x.example.com&allowInsecure=1",
@@ -72,12 +89,37 @@ describe("decodeShareLink", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("rejects a vmess link with alterId>0 (no AEAD)", () => {
+    // {v:"2", add:"x", port:443, id:"550e8400-...0044", aid:1, scy:"auto",
+    //  net:"tcp", type:"none", tls:"tls", sni:"x", alpn:"h2", fp:"chrome"}
+    const aidNonZero = `vmess://${btoa(
+      JSON.stringify({
+        v: "2",
+        add: "x.example.com",
+        port: 443,
+        id: "550e8400-e29b-41d4-a716-446655440044",
+        aid: 1,
+        scy: "auto",
+        net: "tcp",
+        type: "none",
+        tls: "tls",
+        sni: "x.example.com",
+        alpn: "h2",
+        fp: "chrome",
+      }),
+    )}`;
+    const r = decodeShareLink(aidNonZero);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("malformed");
+  });
+
   it.each([
-    [VMESS_LINK, "vmess (legacy)"],
     [SS_LINK, "shadowsocks (legacy)"],
     [SSR_LINK, "shadowsocks (legacy)"],
     [TROJAN_GO_LINK, "trojan-go (legacy)"],
     [TROJAN_WS_LINK, "trojan+ws (unsupported)"],
+    [VMESS_WS_LINK, "vmess+ws (unsupported)"],
     [HTTP_LINK, "http (unsupported as outbound)"],
     [SOCKS_LINK, "socks (unsupported as outbound)"],
     [REALITY_WS, "reality+ws (invalid combination)"],
@@ -126,6 +168,17 @@ describe("encodeShareLink", () => {
     if (!r.ok) throw new Error("expected ok");
     const encoded = encodeShareLink(r.profile);
     expect(encoded.startsWith("trojan://")).toBe(true);
+    const re = decodeShareLink(encoded);
+    expect(re.ok).toBe(true);
+    if (!re.ok) return;
+    expect(re.profile).toEqual(r.profile);
+  });
+
+  it("round-trips a vmess profile", () => {
+    const r = decodeShareLink(VALID_VMESS);
+    if (!r.ok) throw new Error("expected ok");
+    const encoded = encodeShareLink(r.profile);
+    expect(encoded.startsWith("vmess://")).toBe(true);
     const re = decodeShareLink(encoded);
     expect(re.ok).toBe(true);
     if (!re.ok) return;

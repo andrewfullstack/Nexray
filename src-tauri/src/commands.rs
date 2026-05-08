@@ -393,6 +393,7 @@ fn profile_id(p: &Profile) -> &str {
         Profile::CdnWs(p) => &p.id,
         Profile::Reality(p) => &p.id,
         Profile::Trojan(p) => &p.id,
+        Profile::Vmess(p) => &p.id,
     }
 }
 
@@ -717,6 +718,7 @@ fn resolve_active_profile_ips(state: &State<'_, AppState>) -> Result<Vec<String>
             Profile::CdnWs(c) => c.address.clone(),
             Profile::Reality(r) => r.address.clone(),
             Profile::Trojan(t) => t.address.clone(),
+            Profile::Vmess(v) => v.address.clone(),
         })
     };
     let Some(address) = address else {

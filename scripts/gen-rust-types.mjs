@@ -52,6 +52,13 @@ const RUST_OUT = resolve(
 
 const FINGERPRINTS = ["chrome", "firefox", "safari", "ios", "android", "edge", "random"];
 const ALPNS = ["h2", "http/1.1"];
+const VMESS_SECURITIES = [
+  "auto",
+  "none",
+  "aes-128-gcm",
+  "chacha20-poly1305",
+  "zero",
+];
 const CONNECTION_STATES = ["disconnected", "connecting", "connected", "crashed"];
 const ROUTING_PRESETS = ["default", "direct", "global"];
 const ROUTING_DESTINATIONS = ["direct", "proxy", "block"];
@@ -101,6 +108,21 @@ const PROFILE_STRUCTS = {
       ["address", "string"],
       ["port", "u16"],
       ["password", "string"],
+      ["sni", "string"],
+      ["alpn", "Vec<Alpn>"],
+      ["fingerprint", "Fingerprint"],
+    ],
+  },
+  VmessProfile: {
+    kind: '"vmess"',
+    fields: [
+      ["id", "string"],
+      ["name", "string"],
+      ["remark", "?string"],
+      ["address", "string"],
+      ["port", "u16"],
+      ["uuid", "string"],
+      ["security", "VmessSecurity"],
       ["sni", "string"],
       ["alpn", "Vec<Alpn>"],
       ["fingerprint", "Fingerprint"],
@@ -320,6 +342,16 @@ function renderRust() {
   lines.push("}");
   lines.push("");
 
+  // VmessSecurity (cipher) — hyphenated values need per-variant rename.
+  lines.push("#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]");
+  lines.push("pub enum VmessSecurity {");
+  for (const s of VMESS_SECURITIES) {
+    lines.push(`    #[serde(rename = "${s}")]`);
+    lines.push(`    ${pascal(s)},`);
+  }
+  lines.push("}");
+  lines.push("");
+
   // ConnectionState
   lines.push("#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]");
   lines.push("#[serde(rename_all = \"lowercase\")]");
@@ -394,6 +426,8 @@ function renderRust() {
   lines.push("    Reality(RealityProfile),");
   lines.push('    #[serde(rename = "trojan")]');
   lines.push("    Trojan(TrojanProfile),");
+  lines.push('    #[serde(rename = "vmess")]');
+  lines.push("    Vmess(VmessProfile),");
   lines.push("}");
   lines.push("");
 
@@ -440,6 +474,9 @@ function mapType(ty) {
       break;
     case "Vec<Alpn>":
       text = "Vec<Alpn>";
+      break;
+    case "VmessSecurity":
+      text = "VmessSecurity";
       break;
     case "Vec<Profile>":
       text = "Vec<Profile>";

@@ -3,12 +3,16 @@ import {
   FINGERPRINTS,
   RealityProfileSchema,
   TrojanProfileSchema,
+  VMESS_SECURITIES,
+  VmessProfileSchema,
   type CdnWsProfile,
   type Fingerprint,
   type Profile,
   type RealityProfile,
   type SkipReason,
   type TrojanProfile,
+  type VmessProfile,
+  type VmessSecurity,
 } from "./profile";
 
 // ----------------------------------------------------------------------------
@@ -27,10 +31,11 @@ export type DecodeResult =
  * Decode a single share-link. Pure: never performs IO. Always returns a
  * structured result — never throws on malformed input.
  *
- * Supports the modern VLESS shapes plus Trojan over TCP+TLS:
- *   - vless://<uuid>@<host>:<port>?type=ws&security=tls&...   -> cdn-ws
+ * Supports the modern shapes plus Trojan and VMess over TCP+TLS:
+ *   - vless://<uuid>@<host>:<port>?type=ws&security=tls&...     -> cdn-ws
  *   - vless://<uuid>@<host>:<port>?type=tcp&security=reality&... -> reality
- *   - trojan://<password>@<host>:<port>?type=tcp&...           -> trojan
+ *   - trojan://<password>@<host>:<port>?type=tcp&...            -> trojan
+ *   - vmess://<base64(json)>                                    -> vmess
  *
  * Every other prefix or combination produces { ok: false, reason }.
  */
@@ -39,7 +44,6 @@ export function decodeShareLink(raw: string): DecodeResult {
   if (trimmed.length === 0) return { ok: false, reason: "malformed", raw };
 
   const lower = trimmed.toLowerCase();
-  if (lower.startsWith("vmess://")) return { ok: false, reason: "vmess (legacy)", raw };
   if (lower.startsWith("ss://")) return { ok: false, reason: "shadowsocks (legacy)", raw };
   if (lower.startsWith("ssr://")) return { ok: false, reason: "shadowsocks (legacy)", raw };
   // trojan-go is a separate, incompatible fork; we still refuse it. Plain
@@ -55,6 +59,9 @@ export function decodeShareLink(raw: string): DecodeResult {
   }
   if (lower.startsWith("trojan://")) {
     return decodeTrojan(trimmed);
+  }
+  if (lower.startsWith("vmess://")) {
+    return decodeVmess(trimmed);
   }
   if (!lower.startsWith("vless://")) {
     return { ok: false, reason: "unknown protocol", raw };
@@ -114,10 +121,12 @@ export function decodeShareLink(raw: string): DecodeResult {
 }
 
 /**
- * Encode a Profile back to a `vless://...` (or `trojan://...`) share link.
- * Round-trip for normalization and copy-to-clipboard. Pure.
+ * Encode a Profile back to a `vless://...`, `trojan://...`, or `vmess://...`
+ * share link. Round-trip for normalization and copy-to-clipboard. Pure.
  */
 export function encodeShareLink(profile: Profile): string {
+  if (profile.kind === "vmess") return encodeVmess(profile);
+
   const credential =
     profile.kind === "trojan" ? profile.password : profile.uuid;
   const userInfo = encodeURIComponent(credential);
@@ -158,6 +167,37 @@ export function encodeShareLink(profile: Profile): string {
     : "";
   const scheme = profile.kind === "trojan" ? "trojan" : "vless";
   return `${scheme}://${userInfo}@${host}:${port}?${params.toString()}${fragment}`;
+}
+
+/**
+ * VMess emits the v2rayN `vmess://<base64(json)>` format. We always emit the
+ * "v":"2", "net":"tcp", "type":"none", "tls":"tls", "aid":0 fixed fields —
+ * those are the only combinations the parser accepts on the way back in.
+ */
+function encodeVmess(profile: VmessProfile): string {
+  const json = {
+    v: "2",
+    ps: profile.remark ?? "",
+    add: profile.address,
+    port: profile.port,
+    id: profile.uuid,
+    aid: 0,
+    scy: profile.security,
+    net: "tcp",
+    type: "none",
+    host: "",
+    path: "",
+    tls: "tls",
+    sni: profile.sni,
+    alpn: profile.alpn.join(","),
+    fp: profile.fingerprint,
+  };
+  // btoa needs ASCII; UTF-8-encode first via TextEncoder to handle Chinese
+  // remarks etc. round-tripping cleanly.
+  const utf8 = new TextEncoder().encode(JSON.stringify(json));
+  let bin = "";
+  for (let i = 0; i < utf8.length; i++) bin += String.fromCharCode(utf8[i]!);
+  return `vmess://${btoa(bin)}`;
 }
 
 // ----------------------------------------------------------------------------
@@ -267,6 +307,113 @@ function decodeTrojan(raw: string): DecodeResult {
   };
 
   const parsed = TrojanProfileSchema.safeParse(candidate);
+  if (!parsed.success) return { ok: false, reason: "malformed", raw };
+  return { ok: true, profile: parsed.data };
+}
+
+function decodeVmess(raw: string): DecodeResult {
+  // Strip the scheme, then base64-decode (URL-safe or standard, padding
+  // optional). v2rayN emits standard base64; v2rayNG sometimes emits the
+  // URL-safe variant with padding stripped.
+  const body = raw.slice("vmess://".length).trim();
+  if (body.length === 0) return { ok: false, reason: "malformed", raw };
+  // The fragment-after-base64 form is rare but legal — `vmess://...#remark`.
+  // Strip it so the base64 alphabet check below doesn't reject the link.
+  const hashIdx = body.indexOf("#");
+  const b64Part = hashIdx === -1 ? body : body.slice(0, hashIdx);
+  const fragmentPart = hashIdx === -1 ? null : body.slice(hashIdx + 1);
+  let normalized = b64Part.replace(/-/g, "+").replace(/_/g, "/");
+  normalized += "=".repeat((4 - (normalized.length % 4)) % 4);
+  if (!/^[A-Za-z0-9+/]+=*$/.test(normalized)) {
+    return { ok: false, reason: "malformed", raw };
+  }
+
+  let json: unknown;
+  try {
+    const bin = atob(normalized);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    json = JSON.parse(text);
+  } catch {
+    return { ok: false, reason: "malformed", raw };
+  }
+
+  if (typeof json !== "object" || json === null) {
+    return { ok: false, reason: "malformed", raw };
+  }
+  const j = json as Record<string, unknown>;
+
+  // VMess v2rayN field shorthand:
+  //   add  = address           net  = transport (tcp/ws/grpc/...)
+  //   port = port              type = header obfuscation type
+  //   id   = uuid              tls  = "tls" | "none"
+  //   aid  = alterId (must 0)  sni  = TLS SNI
+  //   scy  = cipher            alpn = comma-joined list
+  //   ps   = remark            fp   = uTLS fingerprint
+  const address = typeof j.add === "string" ? j.add : "";
+  // Some generators emit port as a string ("443"), others as a number.
+  const portRaw = typeof j.port === "number" ? j.port : Number(j.port);
+  const port = Number.isFinite(portRaw) ? Math.trunc(portRaw) : Number.NaN;
+  const uuid = typeof j.id === "string" ? j.id : "";
+  const aidRaw = typeof j.aid === "number" ? j.aid : Number(j.aid ?? 0);
+  const aid = Number.isFinite(aidRaw) ? Math.trunc(aidRaw) : Number.NaN;
+
+  if (!address || !uuid || !Number.isFinite(port)) {
+    return { ok: false, reason: "malformed", raw };
+  }
+  // alterId>0 routes through MD5 auth, which xray-core no longer accepts.
+  if (aid !== 0) return { ok: false, reason: "malformed", raw };
+
+  const net = (typeof j.net === "string" ? j.net : "tcp").toLowerCase();
+  if (net === "ws") return { ok: false, reason: "vmess+ws (unsupported)", raw };
+  if (net !== "tcp") return { ok: false, reason: "malformed", raw };
+
+  const headerType = (typeof j.type === "string" ? j.type : "none").toLowerCase();
+  // type=http obfuscates the TCP stream as fake HTTP/1.1 — xray's vmess+tcp
+  // outbound supports it but our scope is plain TCP only.
+  if (headerType !== "none") return { ok: false, reason: "malformed", raw };
+
+  const tlsField = (typeof j.tls === "string" ? j.tls : "").toLowerCase();
+  if (tlsField !== "tls") return { ok: false, reason: "malformed", raw };
+
+  const securityRaw = (typeof j.scy === "string" ? j.scy : "auto").toLowerCase();
+  const security = (VMESS_SECURITIES as readonly string[]).includes(securityRaw)
+    ? (securityRaw as VmessSecurity)
+    : null;
+  if (security === null) return { ok: false, reason: "malformed", raw };
+
+  const sniField = typeof j.sni === "string" && j.sni.length > 0 ? j.sni : address;
+  if (!sniField) return { ok: false, reason: "malformed", raw };
+
+  const fingerprint = pickFingerprint(typeof j.fp === "string" ? j.fp : null);
+  if (fingerprint === null) return { ok: false, reason: "malformed", raw };
+
+  const alpn = parseAlpn(typeof j.alpn === "string" ? j.alpn : null);
+
+  // remark precedence: explicit fragment override (rare) > "ps" field > none.
+  const remarkSource = fragmentPart
+    ? decodeURIComponent(fragmentPart)
+    : typeof j.ps === "string"
+    ? j.ps
+    : "";
+  const remark = remarkSource.length > 0 ? remarkSource.slice(0, 128) : undefined;
+
+  const candidate: VmessProfile = {
+    kind: "vmess",
+    id: profileId("vmess", address, port, uuid),
+    name: remark && remark.length > 0 ? remark.slice(0, 64) : `${address}:${port}`,
+    ...(remark !== undefined ? { remark } : {}),
+    address,
+    port,
+    uuid,
+    security,
+    sni: sniField,
+    alpn,
+    fingerprint,
+  };
+
+  const parsed = VmessProfileSchema.safeParse(candidate);
   if (!parsed.success) return { ok: false, reason: "malformed", raw };
   return { ok: true, profile: parsed.data };
 }

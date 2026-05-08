@@ -4,6 +4,7 @@ import {
   ProfileSchema,
   RealityProfileSchema,
   TrojanProfileSchema,
+  VmessProfileSchema,
 } from "../src/lib/profile";
 
 const baseCdnWs = {
@@ -47,6 +48,19 @@ const baseTrojan = {
   fingerprint: "chrome" as const,
 };
 
+const baseVmess = {
+  kind: "vmess" as const,
+  id: "abcd1234",
+  name: "vmess-vps",
+  address: "198.51.100.77",
+  port: 443,
+  uuid: "550e8400-e29b-41d4-a716-446655440042",
+  security: "auto" as const,
+  sni: "vmess.example.com",
+  alpn: ["h2", "http/1.1"] as ("h2" | "http/1.1")[],
+  fingerprint: "chrome" as const,
+};
+
 describe("ProfileSchema", () => {
   it("accepts a valid cdn-ws profile", () => {
     expect(CdnWsProfileSchema.safeParse(baseCdnWs).success).toBe(true);
@@ -58,6 +72,10 @@ describe("ProfileSchema", () => {
 
   it("accepts a valid trojan profile", () => {
     expect(TrojanProfileSchema.safeParse(baseTrojan).success).toBe(true);
+  });
+
+  it("accepts a valid vmess profile", () => {
+    expect(VmessProfileSchema.safeParse(baseVmess).success).toBe(true);
   });
 
   it.each([
@@ -99,12 +117,26 @@ describe("ProfileSchema", () => {
     expect(TrojanProfileSchema.safeParse(candidate).success).toBe(false);
   });
 
+  it.each([
+    ["bad uuid", { ...baseVmess, uuid: "not-a-uuid" }],
+    ["empty sni", { ...baseVmess, sni: "" }],
+    ["empty alpn", { ...baseVmess, alpn: [] }],
+    ["unknown security cipher", { ...baseVmess, security: "rc4-md5" }],
+    ["unknown fingerprint", { ...baseVmess, fingerprint: "hyperion" }],
+    ["port too low", { ...baseVmess, port: 0 }],
+    ["password is not a vmess field", { ...baseVmess, password: "x" }],
+    ["extra field allowInsecure", { ...baseVmess, allowInsecure: true }],
+  ])("rejects vmess: %s", (_label, candidate) => {
+    expect(VmessProfileSchema.safeParse(candidate).success).toBe(false);
+  });
+
   it("discriminates the union by kind", () => {
     expect(ProfileSchema.safeParse(baseCdnWs).success).toBe(true);
     expect(ProfileSchema.safeParse(baseReality).success).toBe(true);
     expect(ProfileSchema.safeParse(baseTrojan).success).toBe(true);
+    expect(ProfileSchema.safeParse(baseVmess).success).toBe(true);
     expect(
-      ProfileSchema.safeParse({ ...baseCdnWs, kind: "vmess" }).success,
+      ProfileSchema.safeParse({ ...baseCdnWs, kind: "shadowsocks" }).success,
     ).toBe(false);
   });
 });

@@ -3,7 +3,7 @@
 
 mod fixtures;
 
-use fixtures::{VALID_CDN_WS, VALID_REALITY, VALID_TROJAN};
+use fixtures::{VALID_CDN_WS, VALID_REALITY, VALID_TROJAN, VALID_VMESS};
 use nexray_core::xray_config::{
     default_routing_settings, materialize, MaterializeError, XrayConfigOptions,
 };
@@ -29,6 +29,10 @@ fn reality_config(opts: XrayConfigOptions) -> serde_json::Value {
 
 fn trojan_config(opts: XrayConfigOptions) -> serde_json::Value {
     materialize(&parse(VALID_TROJAN), &opts).expect("materialize")
+}
+
+fn vmess_config(opts: XrayConfigOptions) -> serde_json::Value {
+    materialize(&parse(VALID_VMESS), &opts).expect("materialize")
 }
 
 #[test]
@@ -446,6 +450,54 @@ fn rejects_empty_trojan_password() {
         MaterializeError::InvalidField {
             kind: "trojan",
             field: "password"
+        }
+    ));
+}
+
+#[test]
+fn vmess_outbound_matches_xray_shape() {
+    let cfg = vmess_config(XrayConfigOptions::default());
+    let outbound = &cfg["outbounds"][0];
+    assert_eq!(outbound["protocol"], "vmess");
+    assert_eq!(outbound["tag"], "proxy");
+    let user = &outbound["settings"]["vnext"][0]["users"][0];
+    assert_eq!(user["id"], "550e8400-e29b-41d4-a716-446655440042");
+    assert_eq!(user["alterId"], 0);
+    assert_eq!(user["security"], "auto");
+    let vnext = &outbound["settings"]["vnext"][0];
+    assert_eq!(vnext["address"], "198.51.100.77");
+    assert_eq!(vnext["port"], 443);
+    assert_eq!(outbound["streamSettings"]["network"], "tcp");
+    assert_eq!(outbound["streamSettings"]["security"], "tls");
+    assert_eq!(
+        outbound["streamSettings"]["tlsSettings"]["serverName"],
+        "vmess.example.com"
+    );
+    assert_eq!(
+        outbound["streamSettings"]["tlsSettings"]["fingerprint"],
+        "chrome"
+    );
+    // §12 rule: never trust allowInsecure from inputs; materializer always emits false.
+    assert_eq!(
+        outbound["streamSettings"]["tlsSettings"]["allowInsecure"],
+        false
+    );
+}
+
+#[test]
+fn rejects_empty_vmess_uuid() {
+    let mut vmess = match parse(VALID_VMESS) {
+        Profile::Vmess(p) => p,
+        _ => panic!("expected vmess"),
+    };
+    vmess.uuid = String::new();
+    let err = materialize(&Profile::Vmess(vmess), &XrayConfigOptions::default())
+        .expect_err("should reject empty uuid");
+    assert!(matches!(
+        err,
+        MaterializeError::InvalidField {
+            kind: "vmess",
+            field: "uuid"
         }
     ));
 }

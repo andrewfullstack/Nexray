@@ -3,13 +3,17 @@
 
 use std::sync::OnceLock;
 
+use base64::Engine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
 use crate::skip_reason::SkipReason;
-use crate::types_gen::{Alpn, CdnWsProfile, Fingerprint, Profile, RealityProfile, TrojanProfile};
+use crate::types_gen::{
+    Alpn, CdnWsProfile, Fingerprint, Profile, RealityProfile, TrojanProfile, VmessProfile,
+    VmessSecurity,
+};
 
 /// Result of decoding a single share link.
 ///
@@ -41,9 +45,6 @@ pub fn decode_share_link(raw: &str) -> DecodeResult {
     }
 
     let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("vmess://") {
-        return err(SkipReason::VmessLegacy, raw);
-    }
     if lower.starts_with("ss://") || lower.starts_with("ssr://") {
         return err(SkipReason::ShadowsocksLegacy, raw);
     }
@@ -60,6 +61,9 @@ pub fn decode_share_link(raw: &str) -> DecodeResult {
     }
     if lower.starts_with("trojan://") {
         return decode_trojan(trimmed);
+    }
+    if lower.starts_with("vmess://") {
+        return decode_vmess(trimmed);
     }
     if !lower.starts_with("vless://") {
         return err(SkipReason::UnknownProtocol, raw);
@@ -275,6 +279,215 @@ fn decode_trojan(raw: &str) -> DecodeResult {
     }
 }
 
+fn decode_vmess(raw: &str) -> DecodeResult {
+    // Strip the scheme; tolerate an optional `#fragment` after the base64
+    // body (rare but legal — v2rayN sometimes emits it).
+    let body = raw["vmess://".len()..].trim();
+    if body.is_empty() {
+        return err(SkipReason::Malformed, raw);
+    }
+    let (b64_part, fragment_part) = match body.find('#') {
+        Some(i) => (&body[..i], Some(&body[i + 1..])),
+        None => (body, None),
+    };
+    let normalized: String = b64_part.chars().map(|c| match c {
+        '-' => '+',
+        '_' => '/',
+        other => other,
+    }).collect();
+    let pad_needed = (4 - (normalized.len() % 4)) % 4;
+    let padded: String = normalized.chars().chain(std::iter::repeat('=').take(pad_needed)).collect();
+    if !is_strict_b64(&padded) {
+        return err(SkipReason::Malformed, raw);
+    }
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(&padded) {
+        Ok(b) => b,
+        Err(_) => return err(SkipReason::Malformed, raw),
+    };
+    let text = match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return err(SkipReason::Malformed, raw),
+    };
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return err(SkipReason::Malformed, raw),
+    };
+    let obj = match json.as_object() {
+        Some(o) => o,
+        None => return err(SkipReason::Malformed, raw),
+    };
+
+    // VMess v2rayN field shorthand:
+    //   add  = address           net  = transport (tcp/ws/grpc/...)
+    //   port = port              type = header obfuscation type
+    //   id   = uuid              tls  = "tls" | "none"
+    //   aid  = alterId (must 0)  sni  = TLS SNI
+    //   scy  = cipher            alpn = comma-joined list
+    //   ps   = remark            fp   = uTLS fingerprint
+    let address = obj.get("add").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let port_value = obj.get("port");
+    let port: u16 = match port_value {
+        Some(serde_json::Value::Number(n)) => match n.as_u64() {
+            Some(p) if p >= 1 && p <= 65535 => p as u16,
+            _ => return err(SkipReason::Malformed, raw),
+        },
+        Some(serde_json::Value::String(s)) => match s.parse::<u32>() {
+            Ok(p) if (1..=65535).contains(&p) => p as u16,
+            _ => return err(SkipReason::Malformed, raw),
+        },
+        _ => return err(SkipReason::Malformed, raw),
+    };
+    let uuid = obj.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if address.is_empty() || uuid.is_empty() {
+        return err(SkipReason::Malformed, raw);
+    }
+    if Uuid::parse_str(&uuid).is_err() {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    // alterId>0 routes through MD5 auth — xray-core no longer supports it.
+    let aid: i64 = match obj.get("aid") {
+        Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(-1),
+        Some(serde_json::Value::String(s)) => s.parse::<i64>().unwrap_or(-1),
+        None | Some(serde_json::Value::Null) => 0,
+        _ => return err(SkipReason::Malformed, raw),
+    };
+    if aid != 0 {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    let net = obj
+        .get("net")
+        .and_then(|v| v.as_str())
+        .unwrap_or("tcp")
+        .to_ascii_lowercase();
+    if net == "ws" {
+        return err(SkipReason::VmessWs, raw);
+    }
+    if net != "tcp" {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    let header_type = obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("none")
+        .to_ascii_lowercase();
+    if header_type != "none" {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    let tls_field = obj
+        .get("tls")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if tls_field != "tls" {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    let security_raw = obj
+        .get("scy")
+        .and_then(|v| v.as_str())
+        .unwrap_or("auto")
+        .to_ascii_lowercase();
+    let Some(security) = pick_vmess_security(&security_raw) else {
+        return err(SkipReason::Malformed, raw);
+    };
+
+    let sni_field = obj
+        .get("sni")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(address.as_str())
+        .to_string();
+    if sni_field.is_empty() {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    let Some(fingerprint) = pick_fingerprint(obj.get("fp").and_then(|v| v.as_str())) else {
+        return err(SkipReason::Malformed, raw);
+    };
+
+    let alpn = parse_alpn(obj.get("alpn").and_then(|v| v.as_str()));
+
+    // remark precedence: explicit `#fragment` override > "ps" field > none.
+    let remark_source = if let Some(frag) = fragment_part {
+        decode_pct(frag)
+    } else {
+        obj.get("ps")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let remark = if remark_source.is_empty() {
+        None
+    } else {
+        Some(truncate_chars(&remark_source, 128))
+    };
+
+    let id = profile_id("vmess", &address, port, &uuid);
+    let name = remark
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| truncate_chars(s, 64))
+        .unwrap_or_else(|| format!("{address}:{port}"));
+
+    let profile = VmessProfile {
+        id,
+        name,
+        remark,
+        address,
+        port,
+        uuid,
+        security,
+        sni: sni_field,
+        alpn,
+        fingerprint,
+    };
+    DecodeResult::Ok {
+        profile: Profile::Vmess(profile),
+    }
+}
+
+fn is_strict_b64(s: &str) -> bool {
+    let mut seen_pad = false;
+    for c in s.chars() {
+        if c == '=' {
+            seen_pad = true;
+            continue;
+        }
+        if seen_pad {
+            return false;
+        }
+        if !(c.is_ascii_alphanumeric() || c == '+' || c == '/') {
+            return false;
+        }
+    }
+    !s.is_empty()
+}
+
+fn pick_vmess_security(value: &str) -> Option<VmessSecurity> {
+    match value {
+        "auto" => Some(VmessSecurity::Auto),
+        "none" => Some(VmessSecurity::None),
+        "aes-128-gcm" => Some(VmessSecurity::Aes128Gcm),
+        "chacha20-poly1305" => Some(VmessSecurity::Chacha20Poly1305),
+        "zero" => Some(VmessSecurity::Zero),
+        _ => None,
+    }
+}
+
+fn vmess_security_str(s: VmessSecurity) -> &'static str {
+    match s {
+        VmessSecurity::Auto => "auto",
+        VmessSecurity::None => "none",
+        VmessSecurity::Aes128Gcm => "aes-128-gcm",
+        VmessSecurity::Chacha20Poly1305 => "chacha20-poly1305",
+        VmessSecurity::Zero => "zero",
+    }
+}
+
 fn parse_reality(
     raw: &str,
     uuid: &str,
@@ -389,13 +602,17 @@ fn parse_alpn(value: Option<&str>) -> Vec<Alpn> {
     }
 }
 
-/// Encode a Profile back to a `vless://...` (or `trojan://...`) URL. Pure,
-/// mirrors `encodeShareLink`.
+/// Encode a Profile back to a `vless://...`, `trojan://...`, or
+/// `vmess://...` URL. Pure, mirrors `encodeShareLink`.
 pub fn encode_share_link(profile: &Profile) -> String {
+    if let Profile::Vmess(p) = profile {
+        return encode_vmess(p);
+    }
     let (credential, address, port) = match profile {
         Profile::CdnWs(p) => (&p.uuid, &p.address, p.port),
         Profile::Reality(p) => (&p.uuid, &p.address, p.port),
         Profile::Trojan(p) => (&p.password, &p.address, p.port),
+        Profile::Vmess(_) => unreachable!("handled above"),
     };
 
     let user = pct_encode(credential);
@@ -445,6 +662,7 @@ pub fn encode_share_link(profile: &Profile) -> String {
             push("alpn", &alpns.join(","));
             p.remark.as_deref()
         }
+        Profile::Vmess(_) => unreachable!("handled above"),
     };
 
     let scheme = if matches!(profile, Profile::Trojan(_)) {
@@ -460,6 +678,30 @@ pub fn encode_share_link(profile: &Profile) -> String {
         }
     }
     out
+}
+
+fn encode_vmess(p: &VmessProfile) -> String {
+    let alpns: Vec<&str> = p.alpn.iter().map(|a| alpn_str(*a)).collect();
+    let json = serde_json::json!({
+        "v": "2",
+        "ps": p.remark.clone().unwrap_or_default(),
+        "add": p.address,
+        "port": p.port,
+        "id": p.uuid,
+        "aid": 0,
+        "scy": vmess_security_str(p.security),
+        "net": "tcp",
+        "type": "none",
+        "host": "",
+        "path": "",
+        "tls": "tls",
+        "sni": p.sni,
+        "alpn": alpns.join(","),
+        "fp": fingerprint_str(p.fingerprint),
+    });
+    let text = json.to_string();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    format!("vmess://{b64}")
 }
 
 fn fingerprint_str(fp: Fingerprint) -> &'static str {

@@ -9,18 +9,21 @@ import {
   ProfileSchema,
   RealityProfileSchema,
   TrojanProfileSchema,
+  VMESS_SECURITIES,
+  VmessProfileSchema,
   type Fingerprint,
   type Profile,
+  type VmessSecurity,
 } from "../lib/profile";
 import { useProfileStore } from "../stores/profile";
 
-type Kind = "cdn-ws" | "reality" | "trojan";
+type Kind = "cdn-ws" | "reality" | "trojan" | "vmess";
 
 interface FormState {
   kind: Kind;
   address: string;
   port: string;
-  uuid: string;       // VLESS user UUID (cdn-ws + reality)
+  uuid: string;       // VLESS / VMess user UUID
   password: string;   // Trojan credential
   remarks: string;
   // cdn-ws
@@ -33,6 +36,8 @@ interface FormState {
   publicKey: string;
   shortId: string;
   spiderX: string;
+  // vmess
+  vmessSecurity: VmessSecurity;
   // shared
   fingerprint: Fingerprint;
 }
@@ -52,6 +57,7 @@ const initial: FormState = {
   publicKey: "",
   shortId: "",
   spiderX: "",
+  vmessSecurity: "auto",
   fingerprint: "chrome",
 };
 
@@ -159,6 +165,19 @@ export function AddServer() {
             onChange={(v) => update("password", v)}
             mono
           />
+        ) : form.kind === "vmess" ? (
+          <>
+            <FieldRow
+              label="UUID"
+              hint="Required"
+              value={form.uuid}
+              onChange={(v) => update("uuid", v)}
+              mono
+            />
+            <Row label="alterId">
+              <span className="dim mono">0 (AEAD)</span>
+            </Row>
+          </>
         ) : (
           <>
             <FieldRow
@@ -266,6 +285,59 @@ export function AddServer() {
               mono
             />
           </>
+        ) : form.kind === "vmess" ? (
+          <>
+            <Row label="Transport">
+              <span className="mono">tcp</span>
+            </Row>
+            <Row label="TLS">
+              <span className="mono">on</span>
+            </Row>
+            <Row label="Cipher">
+              <select
+                value={form.vmessSecurity}
+                onChange={(e) =>
+                  update("vmessSecurity", e.target.value as VmessSecurity)
+                }
+                style={{ width: "auto" }}
+              >
+                {VMESS_SECURITIES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </Row>
+            <FieldRow
+              label="SNI"
+              hint="TLS server name"
+              value={form.sni}
+              onChange={(v) => update("sni", v)}
+              mono
+            />
+            <Row label="ALPN">
+              <div className="row" style={{ gap: "1rem" }}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.alpnH2}
+                    onChange={(e) => update("alpnH2", e.target.checked)}
+                    style={{ width: "auto" }}
+                  />{" "}
+                  h2
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.alpnHttp11}
+                    onChange={(e) => update("alpnHttp11", e.target.checked)}
+                    style={{ width: "auto" }}
+                  />{" "}
+                  http/1.1
+                </label>
+              </div>
+            </Row>
+          </>
         ) : (
           <>
             <Row label="Transport">
@@ -369,7 +441,7 @@ export function AddServer() {
         <textarea
           value={importText}
           onChange={(e) => setImportText(e.target.value)}
-          placeholder="vless://uuid@host:port?type=…  or  trojan://password@host:port?type=tcp"
+          placeholder="vless:// · trojan://password@host:port · vmess://<base64(json)>"
           style={{ minHeight: "5rem" }}
         />
         {importError && (
@@ -474,35 +546,20 @@ function FieldRow({ label, hint, value, onChange, mono, inputMode }: FieldRowPro
 }
 
 function KindToggle({ value, onChange }: { value: Kind; onChange: (v: Kind) => void }) {
+  const kinds: Kind[] = ["cdn-ws", "reality", "trojan", "vmess"];
   return (
-    <div className="row" style={{ gap: "1rem" }}>
-      <label>
-        <input
-          type="radio"
-          checked={value === "cdn-ws"}
-          onChange={() => onChange("cdn-ws")}
-          style={{ width: "auto", marginRight: "0.4rem" }}
-        />
-        cdn-ws
-      </label>
-      <label>
-        <input
-          type="radio"
-          checked={value === "reality"}
-          onChange={() => onChange("reality")}
-          style={{ width: "auto", marginRight: "0.4rem" }}
-        />
-        reality
-      </label>
-      <label>
-        <input
-          type="radio"
-          checked={value === "trojan"}
-          onChange={() => onChange("trojan")}
-          style={{ width: "auto", marginRight: "0.4rem" }}
-        />
-        trojan
-      </label>
+    <div className="row" style={{ gap: "1rem", flexWrap: "wrap" }}>
+      {kinds.map((k) => (
+        <label key={k}>
+          <input
+            type="radio"
+            checked={value === k}
+            onChange={() => onChange(k)}
+            style={{ width: "auto", marginRight: "0.4rem" }}
+          />
+          {k}
+        </label>
+      ))}
     </div>
   );
 }
@@ -566,6 +623,28 @@ function buildProfile(f: FormState, preserveId: string | undefined): Profile | n
     return RealityProfileSchema.safeParse(candidate).data ?? null;
   }
 
+  if (f.kind === "vmess") {
+    const alpn = [
+      ...(f.alpnH2 ? (["h2"] as const) : []),
+      ...(f.alpnHttp11 ? (["http/1.1"] as const) : []),
+    ];
+    if (alpn.length === 0) return null;
+    const candidate = {
+      kind: "vmess" as const,
+      id,
+      name: f.remarks.trim() || `${f.address}:${port || ""}`,
+      ...(f.remarks.trim() ? { remark: f.remarks.trim() } : {}),
+      address: f.address.trim(),
+      port,
+      uuid: f.uuid.trim(),
+      security: f.vmessSecurity,
+      sni: f.sni.trim() || f.address.trim(),
+      alpn: alpn as ("h2" | "http/1.1")[],
+      fingerprint: f.fingerprint,
+    };
+    return VmessProfileSchema.safeParse(candidate).data ?? null;
+  }
+
   // trojan
   const alpn = [
     ...(f.alpnH2 ? (["h2"] as const) : []),
@@ -614,6 +693,15 @@ function profileToForm(p: Profile): FormState {
       publicKey: p.publicKey,
       shortId: p.shortId,
       spiderX: p.spiderX,
+    };
+  }
+  if (p.kind === "vmess") {
+    return {
+      ...base,
+      uuid: p.uuid,
+      vmessSecurity: p.security,
+      alpnH2: p.alpn.includes("h2"),
+      alpnHttp11: p.alpn.includes("http/1.1"),
     };
   }
   // trojan
