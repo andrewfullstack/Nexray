@@ -11,7 +11,7 @@
     BASE          full release-asset URL prefix
     DMG_ARM       macOS arm64 dmg filename
     DEB           Linux x86_64 deb filename
-    EXE           Windows x86_64 nsis-setup exe filename
+    MSI           Windows x86_64 MSI installer filename
 
   envsubst is invoked with a whitelist of those variable names so any
   other `$` in the file (none right now, but future maintainers
@@ -245,8 +245,8 @@
     </div>
     <div class="card" data-os="windows">
       <h3>Windows</h3>
-      <div class="meta">x86_64 · NSIS 安裝程式</div>
-      <a class="download-link" href="${BASE}/${EXE}">${EXE}</a>
+      <div class="meta">x86_64 · MSI 安裝程式</div>
+      <a class="download-link" href="${BASE}/${MSI}">${MSI}</a>
     </div>
   </div>
 </section>
@@ -256,7 +256,7 @@
   <p style="color: var(--fg-2); font-size: 0.92rem; margin-bottom: 1rem;">
     目前的安裝包未經程式碼簽署。macOS 首次會拒絕開啟
     <code style="font-family: var(--mono);">.dmg</code>,Windows 也會以 SmartScreen 攔截
-    <code style="font-family: var(--mono);">.exe</code>。兩者都可以在數秒內繞過:
+    <code style="font-family: var(--mono);">.msi</code>。兩者都可以在數秒內繞過:
   </p>
   <div class="feature-grid">
     <div class="card feature">
@@ -274,7 +274,7 @@
     <div class="card feature">
       <h3>Windows — 仍要執行</h3>
       <p>
-        點兩下 <code style="font-family: var(--mono);">.exe</code>,SmartScreen 會顯示
+        點兩下 <code style="font-family: var(--mono);">.msi</code>,SmartScreen 會顯示
         「Windows 已保護您的電腦」。按 <strong>其他資訊</strong> →
         <strong>仍要執行</strong>。每個版本只在首次執行時顯示這個警告。
       </p>
@@ -342,7 +342,7 @@
       // INTEL filename to the workflow.)
       setCta(BASE + "/${DMG_ARM}", "下載 macOS 版本(Apple Silicon)");
     } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-      setCta(BASE + "/${EXE}", "下載 Windows 版本");
+      setCta(BASE + "/${MSI}", "下載 Windows 版本");
     } else if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
       setCta(BASE + "/${DEB}", "下載 Linux 版本(.deb)");
     }

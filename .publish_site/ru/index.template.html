@@ -11,7 +11,7 @@
     BASE          full release-asset URL prefix
     DMG_ARM       macOS arm64 dmg filename
     DEB           Linux x86_64 deb filename
-    EXE           Windows x86_64 nsis-setup exe filename
+    MSI           Windows x86_64 MSI installer filename
 
   envsubst is invoked with a whitelist of those variable names so any
   other `$` in the file (none right now, but future maintainers
@@ -245,8 +245,8 @@
     </div>
     <div class="card" data-os="windows">
       <h3>Windows</h3>
-      <div class="meta">x86_64 · установщик NSIS</div>
-      <a class="download-link" href="${BASE}/${EXE}">${EXE}</a>
+      <div class="meta">x86_64 · установщик MSI</div>
+      <a class="download-link" href="${BASE}/${MSI}">${MSI}</a>
     </div>
   </div>
 </section>
@@ -257,7 +257,7 @@
     Сборки пока без цифровой подписи. macOS откажется открывать
     <code style="font-family: var(--mono);">.dmg</code> при первом запуске,
     а Windows SmartScreen покажет предупреждение перед запуском
-    <code style="font-family: var(--mono);">.exe</code>. И то и другое обходится за секунды:
+    <code style="font-family: var(--mono);">.msi</code>. И то и другое обходится за секунды:
   </p>
   <div class="feature-grid">
     <div class="card feature">
@@ -276,7 +276,7 @@
     <div class="card feature">
       <h3>Windows — Выполнить в любом случае</h3>
       <p>
-        Дважды кликните по <code style="font-family: var(--mono);">.exe</code>. SmartScreen
+        Дважды кликните по <code style="font-family: var(--mono);">.msi</code>. SmartScreen
         выдаст «Система Windows защитила ваш компьютер». Нажмите
         <strong>Подробнее</strong> → <strong>Выполнить в любом случае</strong>.
         Предупреждение появляется только при первом запуске каждой версии.
@@ -345,7 +345,7 @@
       // INTEL filename to the workflow.)
       setCta(BASE + "/${DMG_ARM}", "Скачать для macOS (Apple Silicon)");
     } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-      setCta(BASE + "/${EXE}", "Скачать для Windows");
+      setCta(BASE + "/${MSI}", "Скачать для Windows");
     } else if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
       setCta(BASE + "/${DEB}", "Скачать для Linux (.deb)");
     }

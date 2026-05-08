@@ -63,14 +63,16 @@ jobs:
         # One installer per (platform, arch) slot. `bundles` is forwarded
         # to `tauri build --bundles <type>` so tauri-action emits exactly
         # one installer per matrix slot.
-        #   macOS  → .dmg          (Apple Silicon only; Intel dropped)
-        #   Linux  → .deb          (x86_64 + aarch64; AppImage / RPM dropped)
-        #   Windows → NSIS .exe    (x86_64 + aarch64; MSI dropped)
-        # The arm64 slots use GitHub's native arm64 runners
-        # (`ubuntu-22.04-arm`, `windows-11-arm`) — cross-compilation would
-        # need a cross-linker + arch-specific webkit2gtk sysroot for
-        # Linux, which is fragile; native runners produce the same bytes
-        # the user will run.
+        #   macOS  → .dmg   (Apple Silicon only; Intel dropped)
+        #   Linux  → .deb   (x86_64 + aarch64; AppImage / RPM dropped)
+        #   Windows → .msi  (x86_64 only; arm64 dropped pending demand —
+        #                    Wintun on arm64 Windows is sparsely tested
+        #                    and our codepaths don't yet diverge from x64)
+        # The Linux arm64 slot uses GitHub's native arm64 runner
+        # (`ubuntu-22.04-arm`) — cross-compilation would need a
+        # cross-linker + arch-specific webkit2gtk sysroot, which is
+        # fragile; native runners produce the same bytes the user will
+        # run.
         include:
           - os: macos-14
             target: aarch64-apple-darwin
@@ -83,10 +85,7 @@ jobs:
             bundles: deb
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: nsis
-          - os: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            bundles: nsis
+            bundles: msi
 
     steps:
       - uses: actions/checkout@v4
@@ -176,32 +175,30 @@ jobs:
             exit 1
           fi
           # One installer per (platform, arch) slot: .dmg (macOS), .deb
-          # (Linux), .exe (Windows NSIS). The `.nsis.zip{,.sig}` siblings
-          # are only emitted when the tauri-updater signing key is
+          # (Linux), .msi (Windows). The `.msi.zip{,.sig}` siblings are
+          # only emitted when the tauri-updater signing key is
           # configured — left in the glob so they ride along when
           # present, ignored otherwise.
           #
-          # Tauri emits `Nexray_<version>_<arch>.<ext>`. We rewrite that
-          # to `Nexray_<platform>_<version>_<arch>.<ext>` (mac / linux /
-          # win) so a flat directory of installers from all five matrix
-          # slots is unambiguous at a glance — `Nexray_3.1.0_arm64.deb`
-          # vs `Nexray_3.1.0_arm64-setup.exe` was readable; mixing five
-          # files plus their `.sig` siblings benefits from the platform
-          # tag too. The release-notes table classifies by `<arch>.<ext>`
-          # suffix so the new prefix doesn't affect classification.
+          # Tauri emits `Nexray_<version>_<arch>[_<lang>].<ext>`. We
+          # rewrite that to `Nexray_<platform>_<version>_<arch>...` so a
+          # flat directory of installers from all matrix slots is
+          # unambiguous at a glance. The release-notes table classifies
+          # by `<arch>.<ext>` suffix, so the new prefix doesn't affect
+          # classification.
           find "$BUNDLE_DIR" -type f \( \
               -name "*.dmg" -o \
               -name "*.deb" -o \
-              -name "*.exe" -o \
-              -name "*.nsis.zip" -o \
-              -name "*.nsis.zip.sig" \
+              -name "*.msi" -o \
+              -name "*.msi.zip" -o \
+              -name "*.msi.zip.sig" \
             \) -print | while IFS= read -r src; do
             base="$(basename "$src")"
             case "$base" in
-              *.dmg)                                   platform=mac ;;
-              *.deb)                                   platform=linux ;;
-              *.exe|*.nsis.zip|*.nsis.zip.sig)         platform=win ;;
-              *)                                       platform=unknown ;;
+              *.dmg)                              platform=mac ;;
+              *.deb)                              platform=linux ;;
+              *.msi|*.msi.zip|*.msi.zip.sig)      platform=win ;;
+              *)                                  platform=unknown ;;
             esac
             # ${var/_/_<platform>_} replaces the FIRST `_` only — the
             # one that sits between productName and version.
@@ -268,8 +265,7 @@ jobs:
                 *aarch64*.dmg)      echo "| macOS (Apple Silicon) | aarch64 | \`$base\` |" ;;
                 *amd64.deb)         echo "| Linux                 | x86_64  | \`$base\` |" ;;
                 *arm64.deb)         echo "| Linux                 | aarch64 | \`$base\` |" ;;
-                *_x64-setup.exe)    echo "| Windows               | x86_64  | \`$base\` |" ;;
-                *_arm64-setup.exe)  echo "| Windows               | aarch64 | \`$base\` |" ;;
+                *x64*.msi)          echo "| Windows               | x86_64  | \`$base\` |" ;;
                 *) ;;
               esac
             done
@@ -357,7 +353,7 @@ jobs:
           {
             echo "dmg_arm=$(pick 'Nexray_*_aarch64.dmg')"
             echo "deb=$(pick 'Nexray_*_amd64.deb')"
-            echo "exe=$(pick 'Nexray_*_x64-setup.exe')"
+            echo "msi=$(pick 'Nexray_*_x64*.msi')"
           } >> "$GITHUB_OUTPUT"
 
       - name: Render Pages site
@@ -368,14 +364,14 @@ jobs:
           BASE: https://github.com/andrewfullstack/Nexray-App/releases/download/${{ github.ref_name }}
           DMG_ARM: ${{ steps.filenames.outputs.dmg_arm }}
           DEB: ${{ steps.filenames.outputs.deb }}
-          EXE: ${{ steps.filenames.outputs.exe }}
+          MSI: ${{ steps.filenames.outputs.msi }}
         run: |
           set -euo pipefail
           mkdir -p ./pages
           # Whitelisted-variable substitution: only the names listed
           # below are interpolated; any other `$` in the template is
           # left intact.
-          VARS='${VERSION} ${PUBLISH_REPO} ${BASE} ${DMG_ARM} ${DEB} ${EXE}'
+          VARS='${VERSION} ${PUBLISH_REPO} ${BASE} ${DMG_ARM} ${DEB} ${MSI}'
           # English template lives at .publish_site/index.template.html;
           # each non-default locale has its own copy under a matching
           # subdirectory. The same variable whitelist applies to all.

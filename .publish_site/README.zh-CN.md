@@ -14,12 +14,12 @@
 | ----------------------- | ------- | --------------------------------------- |
 | macOS(Apple Silicon)  | aarch64 | `Nexray_<version>_aarch64.dmg`          |
 | Linux                    | x86_64  | `nexray_<version>_amd64.deb`            |
-| Windows                  | x86_64  | `Nexray_<version>_x64-setup.exe`        |
+| Windows                  | x86_64  | `Nexray_<version>_x64_en-US.msi`        |
 
 ## 首次启动 — 绕过未签名警告
 
 当前安装包未做代码签名,因此 macOS 首次会拒绝打开 `.dmg`,Windows 也会用
-SmartScreen 拦截 `.exe`。两者都可以几秒内绕过:
+SmartScreen 拦截 `.msi`。两者都可以几秒内绕过:
 
 ### macOS — 移除隔离标记
 
@@ -33,7 +33,7 @@ sudo xattr -dr com.apple.quarantine /Applications/Nexray.app
 
 ### Windows — 仍要运行
 
-双击 `.exe`,SmartScreen 会提示「Windows 已保护你的电脑」。点击
+双击 `.msi`,SmartScreen 会提示「Windows 已保护你的电脑」。点击
 **更多信息** → **仍要运行**。每个版本只在首次运行时弹这一次。
 
 ## 核心特性
@@ -57,7 +57,7 @@ sudo xattr -dr com.apple.quarantine /Applications/Nexray.app
 本仓库(`Nexray-App`)只承载公开发布物与下载页 — **不包含源代码**。
 
 - `gh-pages` 分支 → 渲染 <https://andrewfullstack.github.io/Nexray-App/>
-- Releases → 安装包 (`.dmg` / `.deb` / `.exe`)
+- Releases → 安装包 (`.dmg` / `.deb` / `.msi`)
 
 源代码维护在独立的私有仓库;每次打 release 标签都会触发 CI 自动构建并把
 安装包(以及本 README、Pages 站)推送到这里。

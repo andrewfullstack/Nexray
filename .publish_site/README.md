@@ -14,12 +14,12 @@ Tray-app simple, kernel-grade fast.
 | --------------------- | ------------ | --------------------------------------- |
 | macOS (Apple Silicon) | aarch64      | `Nexray_<version>_aarch64.dmg`          |
 | Linux                 | x86_64       | `nexray_<version>_amd64.deb`            |
-| Windows               | x86_64       | `Nexray_<version>_x64-setup.exe`        |
+| Windows               | x86_64       | `Nexray_<version>_x64_en-US.msi`        |
 
 ## First launch — bypass the unsigned-binary warnings
 
 The current builds are unsigned. macOS will refuse to open the `.dmg`
-on first launch and Windows SmartScreen warns before running the `.exe`.
+on first launch and Windows SmartScreen warns before running the `.msi`.
 Both are bypassed in seconds:
 
 ### macOS — clear the quarantine flag
@@ -36,7 +36,7 @@ path don't need the command repeated.
 
 ### Windows — Run anyway
 
-Double-click the `.exe`. SmartScreen shows **"Windows protected your PC"**.
+Double-click the `.msi`. SmartScreen shows **"Windows protected your PC"**.
 Click **More info** → **Run anyway**. The warning appears only on first
 launch of each version.
 
@@ -63,7 +63,7 @@ This repo (`Nexray-App`) holds only the public release artifacts and the
 download landing page — it has **no source code**.
 
 - `gh-pages` branch → renders <https://andrewfullstack.github.io/Nexray-App/>
-- Releases → installer binaries (`.dmg` / `.deb` / `.exe`)
+- Releases → installer binaries (`.dmg` / `.deb` / `.msi`)
 
 Source is maintained in a separate private repository; tagged releases
 trigger a CI pipeline that builds installers and force-publishes them

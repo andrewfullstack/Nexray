@@ -11,7 +11,7 @@
     BASE          full release-asset URL prefix
     DMG_ARM       macOS arm64 dmg filename
     DEB           Linux x86_64 deb filename
-    EXE           Windows x86_64 nsis-setup exe filename
+    MSI           Windows x86_64 MSI installer filename
 
   envsubst is invoked with a whitelist of those variable names so any
   other `$` in the file (none right now, but future maintainers
@@ -245,8 +245,8 @@
     </div>
     <div class="card" data-os="windows">
       <h3>Windows</h3>
-      <div class="meta">x86_64 · NSIS installer</div>
-      <a class="download-link" href="${BASE}/${EXE}">${EXE}</a>
+      <div class="meta">x86_64 · MSI installer</div>
+      <a class="download-link" href="${BASE}/${MSI}">${MSI}</a>
     </div>
   </div>
 </section>
@@ -257,7 +257,7 @@
     The current builds are unsigned. macOS will refuse to open the
     <code style="font-family: var(--mono);">.dmg</code> on first launch and Windows SmartScreen
     will warn before running the
-    <code style="font-family: var(--mono);">.exe</code>. Both are bypassed in seconds:
+    <code style="font-family: var(--mono);">.msi</code>. Both are bypassed in seconds:
   </p>
   <div class="feature-grid">
     <div class="card feature">
@@ -276,7 +276,7 @@
       <h3>Windows — Run anyway</h3>
       <p>
         Double-click the
-        <code style="font-family: var(--mono);">.exe</code>. SmartScreen shows
+        <code style="font-family: var(--mono);">.msi</code>. SmartScreen shows
         "Windows protected your PC". Click <strong>More info</strong> →
         <strong>Run anyway</strong>. The warning appears only on first launch
         of each version.
@@ -345,7 +345,7 @@
       // INTEL filename to the workflow.)
       setCta(BASE + "/${DMG_ARM}", "Download for macOS (Apple Silicon)");
     } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-      setCta(BASE + "/${EXE}", "Download for Windows");
+      setCta(BASE + "/${MSI}", "Download for Windows");
     } else if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
       setCta(BASE + "/${DEB}", "Download for Linux (.deb)");
     }
