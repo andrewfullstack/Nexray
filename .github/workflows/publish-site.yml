@@ -1,0 +1,143 @@
+name: Publish site
+
+# Sync `.publish_site/` to Nexray-App without rebuilding installers.
+#
+#   - Renders every `index.template.html` (en + zh-CN + zh-TW + ru)
+#     against the latest existing Nexray-App release's filenames and
+#     force-pushes the result to `gh-pages`.
+#   - Force-pushes the README family (en + zh-CN + zh-TW + ru) to
+#     `main`.
+#
+# Use cases:
+#   - Fix a typo in the public README → push to main, this fires.
+#   - Tweak the Pages CSS or copy → same.
+#   - Add a new section to the bypass guide → same.
+#
+# `release.yml` already does both of these as part of its publish job
+# on every release tag. This workflow lets you do them WITHOUT the
+# 10-15 min build matrix re-running.
+#
+# Auto-fires on push to main when files under `.publish_site/` (or
+# this workflow file) change. Also manually invocable from
+# Actions → Publish site → Run workflow.
+#
+# Required secret: RELEASE_PUBLISH_TOKEN (same as release.yml — fine-
+# grained PAT with Contents: Read & write on andrewfullstack/Nexray-App).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.publish_site/**'
+      - '.github/workflows/publish-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-site:
+    name: Sync .publish_site/ → andrewfullstack/Nexray-App
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pull the most recent existing release on Nexray-App so the
+      # rendered Pages templates point at real download URLs. If
+      # there's no release yet, fall back to a placeholder version —
+      # the structure renders fine, only the download links 404 until
+      # the next real release.
+      - name: Resolve latest-release filenames
+        id: filenames
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO=andrewfullstack/Nexray-App
+          if release_json=$(gh release view --repo "$REPO" --json tagName,assets 2>/dev/null); then
+            tag=$(echo "$release_json" | jq -r .tagName)
+            dmg=$(echo "$release_json" | jq -r '.assets[] | select(.name | endswith("_aarch64.dmg")) | .name' | head -1)
+            deb=$(echo "$release_json" | jq -r '.assets[] | select(.name | endswith("_amd64.deb")) | .name' | head -1)
+            exe=$(echo "$release_json" | jq -r '.assets[] | select(.name | endswith("-setup.exe")) | .name' | head -1)
+            echo "Resolved against existing release $tag on $REPO"
+          else
+            tag=v0.0.0
+            dmg=""; deb=""; exe=""
+            echo "::warning::no release on $REPO yet — rendering with placeholder filenames"
+          fi
+          {
+            echo "version=$tag"
+            echo "dmg_arm=$dmg"
+            echo "deb=$deb"
+            echo "exe=$exe"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Render Pages site (all four locales)
+        env:
+          VERSION: ${{ steps.filenames.outputs.version }}
+          PUBLISH_REPO: andrewfullstack/Nexray-App
+          BASE: https://github.com/andrewfullstack/Nexray-App/releases/download/${{ steps.filenames.outputs.version }}
+          DMG_ARM: ${{ steps.filenames.outputs.dmg_arm }}
+          DEB: ${{ steps.filenames.outputs.deb }}
+          EXE: ${{ steps.filenames.outputs.exe }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ./pages
+          VARS='${VERSION} ${PUBLISH_REPO} ${BASE} ${DMG_ARM} ${DEB} ${EXE}'
+          envsubst "$VARS" < .publish_site/index.template.html > ./pages/index.html
+          for locale in zh-CN zh-TW ru ; do
+            mkdir -p "./pages/$locale"
+            envsubst "$VARS" \
+              < ".publish_site/$locale/index.template.html" \
+              > "./pages/$locale/index.html"
+          done
+          touch ./pages/.nojekyll
+          echo "--- rendered ---"
+          find ./pages -type f -print
+
+      - name: Deploy gh-pages on Nexray-App
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::RELEASE_PUBLISH_TOKEN missing — see release.yml header for setup."
+            exit 1
+          fi
+          cd ./pages
+          git init -q -b gh-pages
+          git config user.name  "andrewfullstack"
+          git config user.email "278670969+andrewfullstack@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Site sync from Nexray@${{ github.sha }} (content-only, no rebuild)"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/andrewfullstack/Nexray-App.git"
+          git push --force --quiet origin gh-pages
+          echo "::notice title=Pages refreshed::https://andrewfullstack.github.io/Nexray-App/"
+
+      - name: Sync READMEs to main of Nexray-App
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::RELEASE_PUBLISH_TOKEN missing — see release.yml header for setup."
+            exit 1
+          fi
+          mkdir -p ./public-main
+          cp .publish_site/README.md       ./public-main/README.md
+          cp .publish_site/README.zh-CN.md ./public-main/README.zh-CN.md
+          cp .publish_site/README.zh-TW.md ./public-main/README.zh-TW.md
+          cp .publish_site/README.ru.md    ./public-main/README.ru.md
+          cd ./public-main
+          git init -q -b main
+          git config user.name  "andrewfullstack"
+          git config user.email "278670969+andrewfullstack@users.noreply.github.com"
+          git add README.md README.zh-CN.md README.zh-TW.md README.ru.md
+          git commit -q -m "Sync READMEs from Nexray@${{ github.sha }} (content-only, no rebuild)"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/andrewfullstack/Nexray-App.git"
+          git push --force --quiet origin main
+          echo "::notice title=READMEs synced::andrewfullstack/Nexray-App/main"
