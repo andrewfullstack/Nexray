@@ -288,13 +288,23 @@ jobs:
               ./downloaded/*
           fi
 
-      # ─── GitHub Pages deploy ─────────────────────────────────────
-      # Render `web/index.template.html` with this release's filenames,
-      # then force-push the result to the `gh-pages` branch of
-      # andrewfullstack/Nexray-App. Pages source must be configured ONCE
-      # on Nexray-App: Settings → Pages → Source: Deploy from a branch
-      # → `gh-pages` / `(root)` → Save. After that, every tag push
-      # auto-refreshes https://andrewfullstack.github.io/Nexray-App/.
+      # ─── Publish site contents to Nexray-App ─────────────────────
+      # The `.publish_site/` folder in THIS repo is the canonical source
+      # of everything that ends up in the public-facing Nexray-App repo:
+      #
+      #   .publish_site/README.md            → Nexray-App `main` branch
+      #   .publish_site/index.template.html  → Nexray-App `gh-pages`
+      #                                         branch (after envsubst
+      #                                         with this release's
+      #                                         filenames + version)
+      #
+      # Both are force-pushed; each release authoritatively replaces the
+      # prior content, so editing this folder in the source repo is the
+      # only supported way to change the public README or Pages site.
+      #
+      # One-time setup on Nexray-App:
+      #   Settings → Pages → Source: Deploy from a branch
+      #     → Branch: `gh-pages` / Folder: `(root)` → Save.
 
       - name: Resolve installer filenames
         id: filenames
@@ -332,7 +342,7 @@ jobs:
           # below are interpolated; any other `$` in the template is
           # left intact.
           envsubst '${VERSION} ${PUBLISH_REPO} ${BASE} ${DMG_ARM} ${DEB} ${EXE}' \
-            < web/index.template.html \
+            < .publish_site/index.template.html \
             > ./pages/index.html
           # Pages serves any folder Jekyll-style by default; .nojekyll
           # disables that so the HTML is served verbatim (no risk of
@@ -365,3 +375,30 @@ jobs:
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/andrewfullstack/Nexray-App.git"
           git push --force --quiet origin gh-pages
           echo "::notice title=Pages deployed::https://${OWNER:-andrewfullstack}.github.io/$(basename andrewfullstack/Nexray-App)/ — enable in Nexray-App → Settings → Pages → Source: gh-pages branch"
+
+      - name: Sync README.md to main of andrewfullstack/Nexray-App
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::RELEASE_PUBLISH_TOKEN missing — README sync needs the same token."
+            exit 1
+          fi
+          # Same single-commit-force-push pattern as gh-pages: main on
+          # the public repo holds nothing but the README, replaced
+          # wholesale on every release. The only authoritative copy of
+          # the public README lives in `.publish_site/README.md` in the
+          # source repo.
+          mkdir -p ./public-main
+          cp .publish_site/README.md ./public-main/README.md
+          cd ./public-main
+          git init -q -b main
+          git config user.name  "andrewfullstack"
+          git config user.email "278670969+andrewfullstack@users.noreply.github.com"
+          git add README.md
+          git commit -q -m "Sync README from Nexray@${{ github.sha }} (${{ github.ref_name }})"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/andrewfullstack/Nexray-App.git"
+          git push --force --quiet origin main
+          echo "::notice title=README synced::andrewfullstack/Nexray-App/main updated from .publish_site/README.md"
