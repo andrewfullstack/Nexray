@@ -1363,6 +1363,29 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
              Remove-NetRoute -DestinationPrefix \"$IP/32\" -Confirm:$false -ErrorAction SilentlyContinue\n\
            }}\n\
          }}\n\
+         \n\
+         # Defensive: confirm the original default route is back. Less\n\
+         # likely to be needed on Windows than on Linux (no NM-equivalent\n\
+         # withdrawing the user's default when our split-default appears),\n\
+         # but corporate VPN clients and ICS / RRAS occasionally do\n\
+         # rebalance the routing table on changes. Mirrors the Linux\n\
+         # restoration step in build_launcher_script_linux.\n\
+         $NowDef4 = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | \
+             Where-Object {{ $_.ifIndex -ne $TUN_IDX }} | \
+             Sort-Object -Property RouteMetric | Select-Object -First 1\n\
+         if (-not $NowDef4 -and $LOCAL_IDX -and $LOCAL_GW) {{\n\
+           New-NetRoute -DestinationPrefix '0.0.0.0/0' -InterfaceIndex $LOCAL_IDX \\\n\
+             -NextHop $LOCAL_GW -ErrorAction SilentlyContinue | Out-Null\n\
+           \"restored IPv4 default: via $LOCAL_GW idx=$LOCAL_IDX\" | Add-Content $LOG\n\
+         }}\n\
+         $NowDef6 = Get-NetRoute -DestinationPrefix '::/0' -ErrorAction SilentlyContinue | \
+             Where-Object {{ $_.ifIndex -ne $TUN_IDX }} | \
+             Sort-Object -Property RouteMetric | Select-Object -First 1\n\
+         if (-not $NowDef6 -and $LOCAL_IDX6 -and $LOCAL_GW6) {{\n\
+           New-NetRoute -DestinationPrefix '::/0' -InterfaceIndex $LOCAL_IDX6 \\\n\
+             -NextHop $LOCAL_GW6 -ErrorAction SilentlyContinue | Out-Null\n\
+           \"restored IPv6 default: via $LOCAL_GW6 idx=$LOCAL_IDX6\" | Add-Content $LOG\n\
+         }}\n\
          'routing torn down' | Add-Content $LOG\n\
          \n\
          Remove-Item -Force $PIDFILE -ErrorAction SilentlyContinue\n\
