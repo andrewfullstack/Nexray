@@ -21,7 +21,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-const VERSION = "v25.1.30";
+const VERSION = "v26.3.27";
 
 /**
  * Pinned SHA-256 hashes per artifact. UPDATE BOTH the version and the hashes
@@ -37,17 +37,17 @@ const HASHES = {
   },
   "aarch64-apple-darwin": {
     asset: "Xray-macos-arm64-v8a.zip",
-    sha256: "9a85d80918d22fc74bbc5aefac9713ea5d20d8f522d4fd11429336015b3dbc67",
+    sha256: "2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf",
     binary: "xray",
   },
   "x86_64-pc-windows-msvc": {
     asset: "Xray-windows-64.zip",
-    sha256: "802c9eff248bdb7e5154b3fbd2132c4ecf4a215b33b4dfde5166ef981765bb7b",
+    sha256: "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad",
     binary: "xray.exe",
   },
   "x86_64-unknown-linux-gnu": {
     asset: "Xray-linux-64.zip",
-    sha256: "20db837e3c33cce9a804c7d991b722a7cbd37bad4b7fc6200457f0b1c63084f2",
+    sha256: "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
     binary: "xray",
   },
   "aarch64-unknown-linux-gnu": {
@@ -63,7 +63,7 @@ const HASHES = {
  * on Windows). Pinned per arch like xray-core. Update both versions in the
  * same PR.
  */
-const TUN2SOCKS_VERSION = "v2.5.2";
+const TUN2SOCKS_VERSION = "v2.6.0";
 // xjasonlyu/tun2socks zips ship their binary named with a platform-arch
 // suffix (`tun2socks-darwin-arm64`, `tun2socks-windows-amd64.exe`, …).
 // `extracted` records that filename; the script renames it to `binary`
@@ -78,19 +78,19 @@ const TUN2SOCKS = {
   },
   "aarch64-apple-darwin": {
     asset: "tun2socks-darwin-arm64.zip",
-    sha256: "b3c508a09116d5c4b63ea3b64ba54585a92ae84f3f94d73a9528b47357552da8",
+    sha256: "4d7138111f3a35866d93551d6d2894bba3ba40223c01e4e2c5870bb61ebeb71e",
     extracted: "tun2socks-darwin-arm64",
     binary: "tun2socks",
   },
   "x86_64-pc-windows-msvc": {
     asset: "tun2socks-windows-amd64.zip",
-    sha256: "06c71bc30e557ceab6964543bd0d68e1b9dfefa272b51a46f60171af621b5f42",
+    sha256: "1429e2e3b1ea09052da2c65e5005538b5730d63da37e304f4ad6fd2698a66695",
     extracted: "tun2socks-windows-amd64.exe",
     binary: "tun2socks.exe",
   },
   "x86_64-unknown-linux-gnu": {
     asset: "tun2socks-linux-amd64.zip",
-    sha256: "4aa7737009a9f06b9f4957c4fc12932ae0cd2039471d2ae4e5d4666ffeb40a2e",
+    sha256: "2c4d9891ca898ecb2b582d158612d44c66793008328852b3465b77828c867e77",
     extracted: "tun2socks-linux-amd64",
     binary: "tun2socks",
   },

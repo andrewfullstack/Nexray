@@ -244,7 +244,7 @@ jobs:
           } > ./release-notes.md
           cat ./release-notes.md
 
-      - name: Create release on andrewfullstack/Nexray-App
+      - name: Create or refresh release on andrewfullstack/Nexray-App
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
         run: |
@@ -253,12 +253,27 @@ jobs:
             echo "::error::RELEASE_PUBLISH_TOKEN secret is not configured. See workflow header for setup."
             exit 1
           fi
-          gh release create "${{ github.ref_name }}" \
-            --repo "andrewfullstack/Nexray-App" \
-            --title "Nexray ${{ github.ref_name }}" \
-            --notes-file ./release-notes.md \
-            --draft \
-            ./downloaded/*
+          TAG="${{ github.ref_name }}"
+          REPO="andrewfullstack/Nexray-App"
+          # Idempotent publish: if a release for this tag already exists
+          # on the public repo (e.g. a cancelled previous run uploaded
+          # binary-less stubs, or this is a re-run after a fix),
+          # overwrite its assets in place with the freshly-built ones.
+          # Otherwise create the release fresh as a draft. Either way,
+          # the artefacts on disk after this step are authoritative.
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG already exists on $REPO — clobbering assets in place"
+            gh release upload "$TAG" --repo "$REPO" --clobber ./downloaded/*
+            gh release edit "$TAG" --repo "$REPO" --notes-file ./release-notes.md
+          else
+            echo "creating fresh draft release $TAG on $REPO"
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "Nexray $TAG" \
+              --notes-file ./release-notes.md \
+              --draft \
+              ./downloaded/*
+          fi
 
       # ─── GitHub Pages deploy ─────────────────────────────────────
       # Render `web/index.template.html` with this release's filenames,
