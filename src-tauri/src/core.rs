@@ -383,22 +383,37 @@ impl Drop for Inner {
 // SOCKS5 health probe
 // ---------------------------------------------------------------------------
 
-/// Probe target. An IPv4 literal so DNS-routing rules (incl. the user's
-/// `rules.conf` overrides) don't accidentally NXDOMAIN the probe and trip a
-/// false-failure on a working proxy. Cloudflare's anycast `1.1.1.1` is
-/// globally reachable; we use the bare host. The HTTP *status code* doesn't
-/// matter — see the comment in `run_health_probe` — so we don't depend on a
-/// specific path being served.
-const PROBE_URL: &str = "https://1.1.1.1/";
+/// Probe targets. Tried in sequence each cycle; ANY success ends the probe.
+///
+/// Multi-target rationale: any single destination can be blocked by a
+/// specific proxy/network combination — Cloudflare-Pages-hosted Workers, for
+/// instance, can't always reach `1.1.1.1` from `fetch()` due to internal-IP
+/// routing constraints, and corporate networks/censors block individual
+/// well-known hosts. With a diverse list we only need ONE to be reachable
+/// for the proxy to pass.
+///
+/// The list deliberately mixes vendors (Apple / Google / Mozilla) and uses
+/// captive-portal detection endpoints which are designed to be
+/// universally reachable, very small, and unauthenticated. HTTP variants
+/// are preferred where the endpoint supports them — captive portals serve
+/// HTTP precisely because phones need to detect them before TLS is up, so
+/// HTTP plays nicely with restrictive Workers that intermittently break
+/// outbound TLS to specific edges.
+const PROBE_URLS: &[&str] = &[
+    "http://captive.apple.com/hotspot-detect.html",
+    "http://detectportal.firefox.com/success.txt",
+    "https://www.gstatic.com/generate_204",
+];
 
 /// Total budget for the supervisor to confirm the proxy is functional.
-/// Cold xray + first TLS handshake + upstream auth round-trip is usually
-/// under 5s; 15s leaves headroom for slow CDN edges and high-latency links.
+/// 15s lets us iterate the URL list ~1.5 times, accounting for cold xray
+/// startup + TLS handshake + auth round-trip on the first attempt.
 const PROBE_DEADLINE: Duration = Duration::from_secs(15);
 
-/// Per-attempt request timeout. Smaller than the deadline so we get
-/// multiple retries within a single deadline window.
-const PROBE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// Per-attempt request timeout. Smaller than the deadline so a single slow
+/// destination doesn't gobble the whole budget; the loop falls through to
+/// the next URL and the next cycle.
+const PROBE_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Spacing between probe attempts. xray binds the SOCKS inbound within a
 /// few hundred ms of receiving its config, so the first attempt usually
@@ -426,7 +441,7 @@ fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
     let deadline = Instant::now() + PROBE_DEADLINE;
     let mut last_err = String::from("(no attempts)");
 
-    loop {
+    'cycle: loop {
         // Bail if the user disconnected or the supervisor caught a process
         // exit and flipped to Crashed: in either case our verdict isn't wanted.
         if !matches!(lock(&inner).state, ConnectionState::Connecting) {
@@ -442,19 +457,41 @@ fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
                 )),
             );
         }
-        // ANY HTTP response means the chain worked end-to-end: SOCKS5
-        // accepted, xray routed via the outbound, upstream auth passed
-        // (otherwise Trojan/VMess/REALITY would have dropped or trip a TLS
-        // handshake failure), and a remote webserver reached us. The
-        // remote's status code reflects whether the *path* exists at the
-        // destination — irrelevant for proving the proxy works. So 404 is a
-        // pass; only network/auth/TLS errors fail.
-        match client.head(PROBE_URL).send() {
-            Ok(_) => return finalize_probe(&inner, Ok(())),
-            Err(e) => last_err = e.to_string(),
+
+        // Try every URL in the list once per cycle. ANY HTTP response
+        // through any one of them means the chain worked end-to-end:
+        // SOCKS5 accepted, xray routed via the outbound, upstream auth
+        // passed (otherwise Trojan/VMess/REALITY would have dropped or
+        // tripped a TLS handshake failure), and a remote webserver
+        // delivered a response. The remote's status code reflects whether
+        // the *path* exists at the destination — irrelevant for proving
+        // the proxy works. So 404 is a pass; only network/auth/TLS
+        // errors fail.
+        for url in PROBE_URLS {
+            // Re-check liveness between targets — disconnects shouldn't
+            // wait until the full cycle finishes.
+            if !matches!(lock(&inner).state, ConnectionState::Connecting) {
+                return;
+            }
+            match client.head(*url).send() {
+                Ok(_) => return finalize_probe(&inner, Ok(())),
+                Err(e) => last_err = format!("{url}: {e}"),
+            }
+            if Instant::now() > deadline {
+                break 'cycle;
+            }
         }
         thread::sleep(PROBE_RETRY_INTERVAL);
     }
+
+    finalize_probe(
+        &inner,
+        Err(format!(
+            "proxy probe timed out after {}s — likely wrong credentials \
+             or server unreachable. Last attempt: {last_err}",
+            PROBE_DEADLINE.as_secs()
+        )),
+    );
 }
 
 fn finalize_probe(inner: &Arc<Mutex<Inner>>, result: Result<(), String>) {
