@@ -175,18 +175,39 @@ jobs:
             ls -la target/${{ matrix.target }}/release 2>&1 || true
             exit 1
           fi
-          # One installer per platform: .dmg (macOS arm64), .deb (Linux
-          # x86_64), .exe (Windows NSIS x86_64). The `.sig` siblings
+          # One installer per (platform, arch) slot: .dmg (macOS), .deb
+          # (Linux), .exe (Windows NSIS). The `.nsis.zip{,.sig}` siblings
           # are only emitted when the tauri-updater signing key is
           # configured — left in the glob so they ride along when
           # present, ignored otherwise.
+          #
+          # Tauri emits `Nexray_<version>_<arch>.<ext>`. We rewrite that
+          # to `Nexray_<platform>_<version>_<arch>.<ext>` (mac / linux /
+          # win) so a flat directory of installers from all five matrix
+          # slots is unambiguous at a glance — `Nexray_3.1.0_arm64.deb`
+          # vs `Nexray_3.1.0_arm64-setup.exe` was readable; mixing five
+          # files plus their `.sig` siblings benefits from the platform
+          # tag too. The release-notes table classifies by `<arch>.<ext>`
+          # suffix so the new prefix doesn't affect classification.
           find "$BUNDLE_DIR" -type f \( \
               -name "*.dmg" -o \
               -name "*.deb" -o \
               -name "*.exe" -o \
               -name "*.nsis.zip" -o \
               -name "*.nsis.zip.sig" \
-            \) -exec cp -v {} ./release-staging/ \;
+            \) -print | while IFS= read -r src; do
+            base="$(basename "$src")"
+            case "$base" in
+              *.dmg)                                   platform=mac ;;
+              *.deb)                                   platform=linux ;;
+              *.exe|*.nsis.zip|*.nsis.zip.sig)         platform=win ;;
+              *)                                       platform=unknown ;;
+            esac
+            # ${var/_/_<platform>_} replaces the FIRST `_` only — the
+            # one that sits between productName and version.
+            newname="${base/_/_${platform}_}"
+            cp -v "$src" "./release-staging/$newname"
+          done
           echo "--- staged ---"
           ls -la ./release-staging
 
@@ -335,7 +356,7 @@ jobs:
           }
           {
             echo "dmg_arm=$(pick 'Nexray_*_aarch64.dmg')"
-            echo "deb=$(pick 'nexray_*_amd64.deb')"
+            echo "deb=$(pick 'Nexray_*_amd64.deb')"
             echo "exe=$(pick 'Nexray_*_x64-setup.exe')"
           } >> "$GITHUB_OUTPUT"
 
