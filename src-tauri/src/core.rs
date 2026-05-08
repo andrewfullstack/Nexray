@@ -385,24 +385,27 @@ impl Drop for Inner {
 
 /// Probe targets. Tried in sequence each cycle; ANY success ends the probe.
 ///
-/// Multi-target rationale: any single destination can be blocked by a
-/// specific proxy/network combination — Cloudflare-Pages-hosted Workers, for
-/// instance, can't always reach `1.1.1.1` from `fetch()` due to internal-IP
-/// routing constraints, and corporate networks/censors block individual
-/// well-known hosts. With a diverse list we only need ONE to be reachable
-/// for the proxy to pass.
+/// CRUCIAL: every entry is an **IP literal**, not a hostname. Hostname-based
+/// targets get classified by xray's domain-routing rules (`geosite:cn`,
+/// `geosite:apple-cn`, `geosite:google-cn` → direct outbound) — a probe to
+/// `captive.apple.com` would route via *direct*, bypass the user's proxy
+/// outbound entirely, and falsely succeed even when the proxy itself is
+/// totally broken (wrong Trojan password, wrong REALITY publicKey, …).
+/// IP-based routing only checks `geoip:private` / `geoip:cn` / catch-all,
+/// so a non-CN public IP is guaranteed to hit the catch-all `→ proxy`
+/// rule and exercise the actual outbound we're trying to validate.
 ///
-/// The list deliberately mixes vendors (Apple / Google / Mozilla) and uses
-/// captive-portal detection endpoints which are designed to be
-/// universally reachable, very small, and unauthenticated. HTTP variants
-/// are preferred where the endpoint supports them — captive portals serve
-/// HTTP precisely because phones need to detect them before TLS is up, so
-/// HTTP plays nicely with restrictive Workers that intermittently break
-/// outbound TLS to specific edges.
+/// 8.8.8.8 and 9.9.9.9 are global anycast DNS resolvers that also serve a
+/// minimal HTTP/HTTPS landing page (302 redirect, typically). 1.1.1.1 is
+/// avoided here because some Cloudflare Workers — including Pages-hosted
+/// VLESS Workers — can't reach Cloudflare's own internal anycast from
+/// `fetch()`. The third entry is a hostname that's NOT in any cn-related
+/// geosite category (Mozilla / IANA), included as a fallback in case both
+/// IPs are network-blocked locally.
 const PROBE_URLS: &[&str] = &[
-    "http://captive.apple.com/hotspot-detect.html",
+    "http://8.8.8.8/",
+    "http://9.9.9.9/",
     "http://detectportal.firefox.com/success.txt",
-    "https://www.gstatic.com/generate_204",
 ];
 
 /// Total budget for the supervisor to confirm the proxy is functional.
@@ -440,7 +443,12 @@ fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
     let client = match reqwest::blocking::Client::builder()
         .proxy(proxy)
         .timeout(PROBE_REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(2))
+        // Don't follow redirects: any HTTP response (including 301/302)
+        // proves the proxy chain works. Following redirects would do extra
+        // DNS resolution + another TCP connect, both of which themselves
+        // go through xray and could bring back the same routing trap that
+        // motivated the IP-literal probe targets.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
     {
         Ok(c) => c,
