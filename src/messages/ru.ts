@@ -178,6 +178,9 @@ export const ru: Record<string, string> = {
   "servers.active_title": "Активный: {name}",
   "servers.row.active": "● активен",
   "servers.row.edit": "Изменить",
+  "servers.row.share_aria": "Поделиться",
+  "servers.row.share_title": "Скопировать ссылку",
+  "servers.row.share_copied": "Скопировано!",
   "servers.ping.timeout": "тайм-аут",
   "servers.ping.timeout_title": "Тайм-аут TCP-подключения или DNS",
   "servers.ping.ms": "{ms} мс",
@@ -188,6 +191,8 @@ export const ru: Record<string, string> = {
     "Вставьте ссылку vless://, trojan:// или vmess://, чтобы автоматически заполнить форму. Устаревшие схемы (ss, trojan-go, …) и WebSocket-варианты vmess/trojan отвергаются.",
   "addserver.help.json":
     "Вставьте серверный JSON в стиле Shadowrocket. Проходят валидацию только VLESS+WebSocket+TLS (cdn-ws) и VLESS+REALITY; всё остальное отклоняется со структурированной причиной.",
+  "addserver.import_top_button": "Импорт",
+  "addserver.import_cancel": "Отмена",
   "addserver.import_button": "Импорт",
   "addserver.import_json_button": "Импорт JSON",
   "addserver.parse_failed": "Не удалось разобрать: {reason}",

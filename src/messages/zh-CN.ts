@@ -167,6 +167,9 @@ export const zhCN: Record<string, string> = {
   "servers.active_title": "活动:{name}",
   "servers.row.active": "● 活动",
   "servers.row.edit": "编辑",
+  "servers.row.share_aria": "分享",
+  "servers.row.share_title": "复制分享链接",
+  "servers.row.share_copied": "已复制!",
   "servers.ping.timeout": "超时",
   "servers.ping.timeout_title": "TCP 连接超时或 DNS 解析失败",
   "servers.ping.ms": "{ms} ms",
@@ -177,6 +180,8 @@ export const zhCN: Record<string, string> = {
     "粘贴 vless://、trojan:// 或 vmess:// 链接以自动填充表单。过时协议(ss、trojan-go 等)以及 vmess/trojan 的 WebSocket 变体将被拒绝。",
   "addserver.help.json":
     "粘贴 Shadowrocket 风格的服务器 JSON。仅 VLESS+WebSocket+TLS (cdn-ws) 和 VLESS+REALITY 通过校验,其他将被结构化拒绝。",
+  "addserver.import_top_button": "导入",
+  "addserver.import_cancel": "取消",
   "addserver.import_button": "导入",
   "addserver.import_json_button": "导入 JSON",
   "addserver.parse_failed": "无法解析:{reason}",

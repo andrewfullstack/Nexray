@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { Trash2, Zap } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { Check, Pencil, Share2, Trash2, Zap } from "lucide-react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { IconButton } from "../components/IconButton";
 import { useProfileStore } from "../stores/profile";
 import { useSubscriptionsStore } from "../stores/subscriptions";
 import { tauri } from "../lib/tauri";
 import type { Profile } from "../lib/profile";
+import { encodeShareLink } from "../lib/share-link";
 
 type Latency = number | null;
 
@@ -579,6 +580,20 @@ function ServerRow({
   onDelete: () => void;
 }) {
   const intl = useIntl();
+  const navigate = useNavigate();
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = async () => {
+    try {
+      const link = encodeShareLink(profile);
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard write can reject if the webview lacks permission;
+      // swallow silently so the row UI doesn't blow up.
+    }
+  };
   return (
     <div
       className="row"
@@ -611,7 +626,7 @@ function ServerRow({
               background: "var(--bg-2)",
             }}
           >
-            {profile.kind}
+            {kindLabel(profile.kind)}
           </span>
           {isActive && (
             <span style={{ color: "var(--green)", fontSize: "0.85em" }}>
@@ -625,11 +640,26 @@ function ServerRow({
       </div>
       <div className="row" style={{ gap: "0.6rem", alignItems: "center" }}>
         <PingPill latency={latency} />
-        <Link to={`/servers/${profile.id}`}>
-          <button>
-            <FormattedMessage id="servers.row.edit" />
-          </button>
-        </Link>
+        <IconButton
+          onClick={() => navigate(`/servers/${profile.id}`)}
+          ariaLabel={intl.formatMessage({ id: "servers.row.edit" })}
+          title={intl.formatMessage({ id: "servers.row.edit" })}
+        >
+          <Pencil size={14} strokeWidth={2.2} />
+        </IconButton>
+        <IconButton
+          onClick={() => void handleShare()}
+          ariaLabel={intl.formatMessage({ id: "servers.row.share_aria" })}
+          title={intl.formatMessage({
+            id: copied ? "servers.row.share_copied" : "servers.row.share_title",
+          })}
+        >
+          {copied ? (
+            <Check size={14} strokeWidth={2.4} color="var(--green)" />
+          ) : (
+            <Share2 size={14} strokeWidth={2.2} />
+          )}
+        </IconButton>
         <IconButton
           danger
           onClick={onDelete}
@@ -684,6 +714,19 @@ function PingPill({ latency }: { latency: Latency | undefined }) {
       <FormattedMessage id="servers.ping.ms" values={{ ms: latency }} />
     </span>
   );
+}
+
+function kindLabel(kind: Profile["kind"]): string {
+  switch (kind) {
+    case "cdn-ws":
+      return "Vless(Websocket)";
+    case "reality":
+      return "Vless(Reality)";
+    case "trojan":
+      return "Trojan";
+    case "vmess":
+      return "Vmess(TCP+TLS)";
+  }
 }
 
 function pingColor(ms: number): string {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { FormattedMessage } from "react-intl";
+import { ArrowLeft, ChevronRight, Download, FileJson, Link2, X } from "lucide-react";
 import { decodeShadowrocketJson } from "../lib/import-json";
 import { decodeShareLink } from "../lib/share-link";
 import {
@@ -43,7 +44,7 @@ interface FormState {
 }
 
 const initial: FormState = {
-  kind: "cdn-ws",
+  kind: "reality",
   address: "",
   port: "443",
   uuid: "",
@@ -83,6 +84,15 @@ export function AddServer() {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [importMode, setImportMode] = useState<"menu" | "share" | "json" | null>(
+    null,
+  );
+
+  const closeImport = () => {
+    setImportMode(null);
+    setImportError(null);
+    setJsonError(null);
+  };
 
   // Re-prefill if the edit target appears later (e.g. profiles hydrate
   // after first render) or the route id changes.
@@ -110,26 +120,36 @@ export function AddServer() {
     }
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     setImportError(null);
     const r = decodeShareLink(importText.trim());
     if (!r.ok) {
       setImportError(r.reason);
       return;
     }
-    setForm(profileToForm(r.profile));
-    setImportText("");
+    try {
+      await saveProfile(r.profile);
+      setImportText("");
+      navigate("/servers");
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : String(e));
+    }
   };
 
-  const handleImportJson = () => {
+  const handleImportJson = async () => {
     setJsonError(null);
     const r = decodeShadowrocketJson(jsonText);
     if (!r.ok) {
       setJsonError(r.reason);
       return;
     }
-    setForm(profileToForm(r.profile));
-    setJsonText("");
+    try {
+      await saveProfile(r.profile);
+      setJsonText("");
+      navigate("/servers");
+    } catch (e) {
+      setJsonError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -137,6 +157,204 @@ export function AddServer() {
 
   return (
     <>
+      <div className="card import-card">
+        {importMode === null ? (
+          <div className="import-collapsed">
+            <button
+              type="button"
+              className="import-trigger"
+              onClick={() => setImportMode("menu")}
+            >
+              <Download size={14} strokeWidth={2.4} />
+              <FormattedMessage id="addserver.import_top_button" />
+            </button>
+          </div>
+        ) : importMode === "menu" ? (
+          <>
+            <div className="import-header">
+              <span className="import-header-title">
+                <FormattedMessage id="addserver.import_top_button" />
+              </span>
+              <button
+                type="button"
+                className="import-close"
+                onClick={closeImport}
+                aria-label="Close"
+              >
+                <X size={14} strokeWidth={2.4} />
+              </button>
+            </div>
+            <div className="import-options">
+              <button
+                type="button"
+                className="import-option"
+                onClick={() => setImportMode("share")}
+              >
+                <span className="import-option-icon">
+                  <Link2 size={18} strokeWidth={2} />
+                </span>
+                <span className="import-option-text">
+                  <strong>
+                    <FormattedMessage id="addserver.heading.share_link" />
+                  </strong>
+                  <small>
+                    <FormattedMessage id="addserver.help.share_link" />
+                  </small>
+                </span>
+                <ChevronRight
+                  size={16}
+                  strokeWidth={2.2}
+                  className="import-option-chevron"
+                />
+              </button>
+              <button
+                type="button"
+                className="import-option"
+                onClick={() => setImportMode("json")}
+              >
+                <span className="import-option-icon">
+                  <FileJson size={18} strokeWidth={2} />
+                </span>
+                <span className="import-option-text">
+                  <strong>
+                    <FormattedMessage id="addserver.heading.json" />
+                  </strong>
+                  <small>
+                    <FormattedMessage id="addserver.help.json" />
+                  </small>
+                </span>
+                <ChevronRight
+                  size={16}
+                  strokeWidth={2.2}
+                  className="import-option-chevron"
+                />
+              </button>
+            </div>
+          </>
+        ) : importMode === "share" ? (
+          <>
+            <div className="import-panel-head">
+              <button
+                type="button"
+                className="import-back"
+                onClick={() => setImportMode("menu")}
+                aria-label="Back"
+              >
+                <ArrowLeft size={14} strokeWidth={2.4} />
+              </button>
+              <span className="import-panel-icon">
+                <Link2 size={16} strokeWidth={2} />
+              </span>
+              <div className="import-panel-text">
+                <strong>
+                  <FormattedMessage id="addserver.heading.share_link" />
+                </strong>
+                <small>
+                  <FormattedMessage id="addserver.help.share_link" />
+                </small>
+              </div>
+              <button
+                type="button"
+                className="import-close"
+                onClick={closeImport}
+                aria-label="Close"
+              >
+                <X size={14} strokeWidth={2.4} />
+              </button>
+            </div>
+            <textarea
+              className="import-textarea"
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="vless:// · trojan://password@host:port · vmess://<base64(json)>"
+              style={{ minHeight: "5.5rem" }}
+            />
+            {importError && (
+              <div className="flash err">
+                <FormattedMessage
+                  id="addserver.parse_failed"
+                  values={{ reason: importError }}
+                />
+              </div>
+            )}
+            <div className="import-actions">
+              <button type="button" onClick={closeImport}>
+                <FormattedMessage id="addserver.import_cancel" />
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void handleImport()}
+                disabled={!importText.trim()}
+              >
+                <FormattedMessage id="addserver.import_button" />
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="import-panel-head">
+              <button
+                type="button"
+                className="import-back"
+                onClick={() => setImportMode("menu")}
+                aria-label="Back"
+              >
+                <ArrowLeft size={14} strokeWidth={2.4} />
+              </button>
+              <span className="import-panel-icon">
+                <FileJson size={16} strokeWidth={2} />
+              </span>
+              <div className="import-panel-text">
+                <strong>
+                  <FormattedMessage id="addserver.heading.json" />
+                </strong>
+                <small>
+                  <FormattedMessage id="addserver.help.json" />
+                </small>
+              </div>
+              <button
+                type="button"
+                className="import-close"
+                onClick={closeImport}
+                aria-label="Close"
+              >
+                <X size={14} strokeWidth={2.4} />
+              </button>
+            </div>
+            <textarea
+              className="import-textarea"
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+              placeholder='{ "type": "VLESS", "host": "...", "port": "443", "password": "...", "obfs": "websocket", "tls": true, ... }'
+              style={{ minHeight: "8rem" }}
+              spellCheck={false}
+            />
+            {jsonError && (
+              <div className="flash err">
+                <FormattedMessage
+                  id="addserver.json_parse_failed"
+                  values={{ reason: jsonError }}
+                />
+              </div>
+            )}
+            <div className="import-actions">
+              <button type="button" onClick={closeImport}>
+                <FormattedMessage id="addserver.import_cancel" />
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void handleImportJson()}
+                disabled={!jsonText.trim()}
+              >
+                <FormattedMessage id="addserver.import_json_button" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="card">
         <Row label="Profile">
           <KindToggle value={form.kind} onChange={(v) => update("kind", v)} />
@@ -179,18 +397,18 @@ export function AddServer() {
             </Row>
           </>
         ) : (
-          <>
-            <FieldRow
-              label="UUID"
-              hint="Required"
-              value={form.uuid}
-              onChange={(v) => update("uuid", v)}
-              mono
-            />
-            <Row label="Encryption">
-              <span className="dim mono">none</span>
-            </Row>
-          </>
+          // VLESS (cdn-ws or reality): just UUID. encryption=none is still
+          // pinned in the materializer because xray-core requires it; we
+          // don't surface it in the UI because it would read as "no
+          // encryption" while the actual security comes from the outer
+          // layer (REALITY for reality, TLS for cdn-ws).
+          <FieldRow
+            label="UUID"
+            hint="Required"
+            value={form.uuid}
+            onChange={(v) => update("uuid", v)}
+            mono
+          />
         )}
 
         {form.kind === "cdn-ws" ? (
@@ -428,67 +646,6 @@ export function AddServer() {
       </div>
 
       {error && <div className="flash err">{error}</div>}
-
-      <div className="card">
-        <strong>
-          <FormattedMessage id="addserver.heading.share_link" />
-        </strong>
-        <p className="dim" style={{ margin: "0.4rem 0 0.5rem" }}>
-          <small>
-            <FormattedMessage id="addserver.help.share_link" />
-          </small>
-        </p>
-        <textarea
-          value={importText}
-          onChange={(e) => setImportText(e.target.value)}
-          placeholder="vless:// · trojan://password@host:port · vmess://<base64(json)>"
-          style={{ minHeight: "5rem" }}
-        />
-        {importError && (
-          <div className="flash err">
-            <FormattedMessage
-              id="addserver.parse_failed"
-              values={{ reason: importError }}
-            />
-          </div>
-        )}
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: "0.5rem" }}>
-          <button onClick={handleImport} disabled={!importText.trim()}>
-            <FormattedMessage id="addserver.import_button" />
-          </button>
-        </div>
-      </div>
-
-      <div className="card">
-        <strong>
-          <FormattedMessage id="addserver.heading.json" />
-        </strong>
-        <p className="dim" style={{ margin: "0.4rem 0 0.5rem" }}>
-          <small>
-            <FormattedMessage id="addserver.help.json" />
-          </small>
-        </p>
-        <textarea
-          value={jsonText}
-          onChange={(e) => setJsonText(e.target.value)}
-          placeholder='{ "type": "VLESS", "host": "...", "port": "443", "password": "...", "obfs": "websocket", "tls": true, ... }'
-          style={{ minHeight: "8rem" }}
-          spellCheck={false}
-        />
-        {jsonError && (
-          <div className="flash err">
-            <FormattedMessage
-              id="addserver.json_parse_failed"
-              values={{ reason: jsonError }}
-            />
-          </div>
-        )}
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: "0.5rem" }}>
-          <button onClick={handleImportJson} disabled={!jsonText.trim()}>
-            <FormattedMessage id="addserver.import_json_button" />
-          </button>
-        </div>
-      </div>
     </>
   );
 }
@@ -546,7 +703,7 @@ function FieldRow({ label, hint, value, onChange, mono, inputMode }: FieldRowPro
 }
 
 function KindToggle({ value, onChange }: { value: Kind; onChange: (v: Kind) => void }) {
-  const kinds: Kind[] = ["cdn-ws", "reality", "trojan", "vmess"];
+  const kinds: Kind[] = ["reality", "cdn-ws", "trojan", "vmess"];
   return (
     <div className="row" style={{ gap: "1rem", flexWrap: "wrap" }}>
       {kinds.map((k) => (
@@ -557,11 +714,24 @@ function KindToggle({ value, onChange }: { value: Kind; onChange: (v: Kind) => v
             onChange={() => onChange(k)}
             style={{ width: "auto", marginRight: "0.4rem" }}
           />
-          {k}
+          {kindLabel(k)}
         </label>
       ))}
     </div>
   );
+}
+
+function kindLabel(kind: Kind): string {
+  switch (kind) {
+    case "cdn-ws":
+      return "Vless(Websocket)";
+    case "reality":
+      return "Vless(Reality)";
+    case "trojan":
+      return "Trojan";
+    case "vmess":
+      return "Vmess(TCP+TLS)";
+  }
 }
 
 // ----------------------------------------------------------------------------

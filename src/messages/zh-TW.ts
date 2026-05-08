@@ -170,6 +170,9 @@ export const zhTW: Record<string, string> = {
   "servers.active_title": "作用中:{name}",
   "servers.row.active": "● 作用中",
   "servers.row.edit": "編輯",
+  "servers.row.share_aria": "分享",
+  "servers.row.share_title": "複製分享連結",
+  "servers.row.share_copied": "已複製!",
   "servers.ping.timeout": "逾時",
   "servers.ping.timeout_title": "TCP 連線逾時或 DNS 解析失敗",
   "servers.ping.ms": "{ms} ms",
@@ -180,6 +183,8 @@ export const zhTW: Record<string, string> = {
     "貼上 vless://、trojan:// 或 vmess:// 連結以自動填入表單。過時通訊協定(ss、trojan-go 等)以及 vmess/trojan 的 WebSocket 變體將被拒絕。",
   "addserver.help.json":
     "貼上 Shadowrocket 風格的伺服器 JSON。僅 VLESS+WebSocket+TLS (cdn-ws) 和 VLESS+REALITY 通過驗證,其他會被結構化拒絕。",
+  "addserver.import_top_button": "匯入",
+  "addserver.import_cancel": "取消",
   "addserver.import_button": "匯入",
   "addserver.import_json_button": "匯入 JSON",
   "addserver.parse_failed": "無法解析:{reason}",

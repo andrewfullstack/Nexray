@@ -182,6 +182,9 @@ export const en: Record<string, string> = {
   "servers.active_title": "Active: {name}",
   "servers.row.active": "● active",
   "servers.row.edit": "Edit",
+  "servers.row.share_aria": "Share",
+  "servers.row.share_title": "Copy share link",
+  "servers.row.share_copied": "Copied!",
   "servers.ping.timeout": "timeout",
   "servers.ping.timeout_title": "TCP connect timed out or DNS failed",
   "servers.ping.ms": "{ms} ms",
@@ -192,6 +195,8 @@ export const en: Record<string, string> = {
     "Paste a vless://, trojan://, or vmess:// link to autofill the form. Legacy schemes (ss, trojan-go, ...) and the WebSocket variants of vmess/trojan are rejected.",
   "addserver.help.json":
     "Paste a Shadowrocket-style server JSON. Only VLESS+WebSocket+TLS (cdn-ws) and VLESS+REALITY survive validation; anything else is rejected with a structured reason.",
+  "addserver.import_top_button": "Import",
+  "addserver.import_cancel": "Cancel",
   "addserver.import_button": "Import",
   "addserver.import_json_button": "Import JSON",
   "addserver.parse_failed": "Could not parse: {reason}",
