@@ -357,9 +357,11 @@ fn now_ms() -> u64 {
 /// decision — the high-volume `accepted tcp:HOST:PORT [INBOUND ->
 /// OUTBOUND]` and `accepted udp:HOST:PORT [...]` patterns. xray-core
 /// emits one such INFO line per accepted connection, including:
+///
 ///   - Our 1Hz / 3s Stats API polls (`[api-in -> api]`).
 ///   - Every browser tab's connections through the SOCKS inbound.
 ///   - Every ad-block hit (`[socks-in -> block]`) from the rules file.
+///
 /// The speedometer and egress check already give visual confirmation
 /// of traffic flow, so dropping these lines from the wrapper log is
 /// pure noise reduction. Errors (stderr) and one-shot startup banners
