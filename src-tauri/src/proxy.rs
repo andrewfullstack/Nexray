@@ -27,6 +27,7 @@
 //!   supported in this build — we surface a clear error instead of silently
 //!   succeeding.
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 use std::sync::Mutex;
 
