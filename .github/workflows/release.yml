@@ -130,16 +130,18 @@ jobs:
       - name: Build & bundle
         uses: tauri-apps/tauri-action@v0
         env:
+          # Tauri auto-updater signing — used only when
+          # tauri.conf.json → plugins.updater.active = true. Currently
+          # false; key absent is fine.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # Code-signing env vars (APPLE_*, WINDOWS_*) deliberately NOT
+          # forwarded for the initial release — `tauri-action` attempts
+          # `security import` whenever APPLE_CERTIFICATE is non-empty,
+          # and a malformed-but-non-empty secret kills the macOS bundle
+          # step. Re-add these env entries when you have working signing
+          # certs. Until then artefacts ship unsigned (Gatekeeper
+          # right-click-Open / SmartScreen warning on first launch).
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
