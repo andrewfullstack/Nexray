@@ -386,9 +386,10 @@ impl Drop for Inner {
 /// Probe target. An IPv4 literal so DNS-routing rules (incl. the user's
 /// `rules.conf` overrides) don't accidentally NXDOMAIN the probe and trip a
 /// false-failure on a working proxy. Cloudflare's anycast `1.1.1.1` is
-/// globally reachable; `cdn-cgi/trace` returns a small text body and a
-/// 200 status with no auth.
-const PROBE_URL: &str = "https://1.1.1.1/cdn-cgi/trace";
+/// globally reachable; we use the bare host. The HTTP *status code* doesn't
+/// matter — see the comment in `run_health_probe` — so we don't depend on a
+/// specific path being served.
+const PROBE_URL: &str = "https://1.1.1.1/";
 
 /// Total budget for the supervisor to confirm the proxy is functional.
 /// Cold xray + first TLS handshake + upstream auth round-trip is usually
@@ -441,11 +442,15 @@ fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
                 )),
             );
         }
+        // ANY HTTP response means the chain worked end-to-end: SOCKS5
+        // accepted, xray routed via the outbound, upstream auth passed
+        // (otherwise Trojan/VMess/REALITY would have dropped or trip a TLS
+        // handshake failure), and a remote webserver reached us. The
+        // remote's status code reflects whether the *path* exists at the
+        // destination — irrelevant for proving the proxy works. So 404 is a
+        // pass; only network/auth/TLS errors fail.
         match client.head(PROBE_URL).send() {
-            Ok(res) if res.status().is_success() || res.status().is_redirection() => {
-                return finalize_probe(&inner, Ok(()));
-            }
-            Ok(res) => last_err = format!("HTTP {}", res.status()),
+            Ok(_) => return finalize_probe(&inner, Ok(())),
             Err(e) => last_err = e.to_string(),
         }
         thread::sleep(PROBE_RETRY_INTERVAL);
