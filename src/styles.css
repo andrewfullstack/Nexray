@@ -416,9 +416,12 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none;
 }
 .info-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
 .info-tip-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  z-index: 50;
+  /* Position is set inline by InfoTip.tsx (fixed coords from trigger
+   * rect). The component portals into document.body, so this popover
+   * always renders above every card's backdrop-filter stacking context
+   * — without the portal, sibling cards rendered after the trigger's
+   * card would draw on top. */
+  z-index: 1000;
   /* Solid opaque background — earlier we used the translucent
    * `--bg-elev-2`, which let underlying cards bleed through and turned
    * tall popovers into unreadable mush on the Connection page. */

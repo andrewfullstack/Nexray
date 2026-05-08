@@ -220,6 +220,9 @@ impl XraySidecar {
                 if line.trim().is_empty() {
                     continue;
                 }
+                if is_stats_poll_noise(&line) {
+                    continue;
+                }
                 tracing::warn!(target: "xray", "{line}");
                 let mut inner = lock(&stderr_arc);
                 inner.last_stderr_line = Some(line);
@@ -235,6 +238,9 @@ impl XraySidecar {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines().map_while(Result::ok) {
                     if line.trim().is_empty() {
+                        continue;
+                    }
+                    if is_stats_poll_noise(&line) {
                         continue;
                     }
                     tracing::info!(target: "xray", "{line}");
@@ -345,4 +351,51 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system clock pre-1970?")
         .as_millis() as u64
+}
+
+/// True when an xray log line is a routine per-connection routing
+/// decision — the high-volume `accepted tcp:HOST:PORT [INBOUND ->
+/// OUTBOUND]` and `accepted udp:HOST:PORT [...]` patterns. xray-core
+/// emits one such INFO line per accepted connection, including:
+///   - Our 1Hz / 3s Stats API polls (`[api-in -> api]`).
+///   - Every browser tab's connections through the SOCKS inbound.
+///   - Every ad-block hit (`[socks-in -> block]`) from the rules file.
+/// The speedometer and egress check already give visual confirmation
+/// of traffic flow, so dropping these lines from the wrapper log is
+/// pure noise reduction. Errors (stderr) and one-shot startup banners
+/// still surface — only the per-connection chatter is suppressed.
+fn is_stats_poll_noise(line: &str) -> bool {
+    line.contains("accepted tcp:") || line.contains("accepted udp:")
+}
+
+#[cfg(test)]
+mod core_tests {
+    use super::*;
+
+    #[test]
+    fn filter_matches_actual_xray_routing_logs() {
+        // Captured: stats-poll RPC against the api inbound.
+        let stats_poll = "2026/05/08 20:11:03.899910 from 127.0.0.1:55682 accepted tcp:127.0.0.1:55522 [api-in -> api]";
+        assert!(is_stats_poll_noise(stats_poll));
+
+        // Captured: real ad-block hit through the SOCKS inbound.
+        let ad_block = "2026/05/08 20:39:03.872410 from tcp:127.0.0.1:56856 accepted tcp:live.primis.tech:443 [socks-in -> block]";
+        assert!(is_stats_poll_noise(ad_block));
+
+        // Captured: real proxied traffic.
+        let proxied = "2026/05/08 20:39:03.872410 from tcp:127.0.0.1:56789 accepted tcp:example.com:443 [socks-in -> proxy]";
+        assert!(is_stats_poll_noise(proxied));
+
+        // UDP traffic via TUN gets the same treatment.
+        let udp = "2026/05/08 20:39:03.872410 from udp:127.0.0.1:56000 accepted udp:1.1.1.1:53 [tun-in -> proxy]";
+        assert!(is_stats_poll_noise(udp));
+
+        // Sanity: startup banners and warnings DON'T match — those
+        // lines (one-shot, surface useful boot info or errors) keep
+        // their normal log level.
+        let startup = "Xray 25.5.0 (Xray, Penetrates Everything.) Custom (go1.22.5 darwin/arm64)";
+        assert!(!is_stats_poll_noise(startup));
+        let started = "2026/05/08 20:39:00.000000 [Info] core/server.go:175 starting Xray ...";
+        assert!(!is_stats_poll_noise(started));
+    }
 }

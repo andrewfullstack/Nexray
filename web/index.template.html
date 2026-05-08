@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<!--
+  Nexray — Pages download site template.
+
+  Rendered by the release workflow (`.github/workflows/release.yml`)
+  via `envsubst` on every `v*.*.*` tag. The publish job exports the
+  following variables before substitution:
+
+    VERSION       e.g. "v0.0.1"
+    PUBLISH_REPO  "andrewfullstack/Nexray-App"
+    BASE          full release-asset URL prefix
+    DMG_ARM       macOS arm64 dmg filename
+    DEB           Linux x86_64 deb filename
+    EXE           Windows x86_64 nsis-setup exe filename
+
+  envsubst is invoked with a whitelist of those variable names so any
+  other `$` in the file (none right now, but future maintainers
+  beware) is left intact.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexray — Modern VLESS proxy client</title>
+<meta name="description" content="A modern, minimal VLESS+REALITY / VLESS+WS+TLS proxy client for macOS, Windows, and Linux.">
+<meta property="og:title" content="Nexray — Modern VLESS proxy client">
+<meta property="og:description" content="VLESS+REALITY and VLESS+WS+TLS only. Tray-app simple, kernel-grade fast.">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    --bg:        #0b0e14;
+    --bg-card:   rgba(28, 34, 42, 0.72);
+    --bg-input:  rgba(13, 17, 23, 0.85);
+    --fg:        #ecf2f9;
+    --fg-2:      #a5b1c0;
+    --fg-3:      #6b7785;
+    --accent:    #4f8aff;
+    --accent-2:  #7c5dff;
+    --green:     #4ad29c;
+    --border:    rgba(255, 255, 255, 0.07);
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    background:
+      radial-gradient(1200px 800px at 75% -10%, rgba(124, 93, 255, 0.10), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(79, 138, 255, 0.08), transparent 60%),
+      var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.005em;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-2); }
+  .container { max-width: 980px; margin: 0 auto; padding: 0 1.5rem; }
+
+  header { text-align: center; padding: 5.5rem 0 3rem; }
+  .brand-mark {
+    display: inline-flex; align-items: center; gap: 0.6rem;
+    font-size: 1.6rem; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  .version-pill {
+    display: inline-block; margin-top: 1.5rem;
+    padding: 0.3rem 0.75rem;
+    background: rgba(79, 138, 255, 0.15);
+    border: 1px solid rgba(79, 138, 255, 0.30);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: var(--accent);
+  }
+  h1 {
+    margin-top: 1rem;
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .tagline {
+    margin-top: 1rem;
+    font-size: clamp(1rem, 2.5vw, 1.2rem);
+    color: var(--fg-2);
+    max-width: 560px; margin-left: auto; margin-right: auto;
+  }
+  .cta-row {
+    margin-top: 2.5rem;
+    display: flex; justify-content: center; gap: 0.75rem; flex-wrap: wrap;
+  }
+  .cta {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.85rem 1.5rem;
+    border-radius: var(--radius-md);
+    font-weight: 600; font-size: 1rem;
+    text-decoration: none;
+    transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+  }
+  .cta-primary {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(79, 138, 255, 0.28);
+  }
+  .cta-primary:hover {
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 12px 32px rgba(79, 138, 255, 0.40);
+  }
+  .cta-secondary {
+    background: var(--bg-card);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+  }
+  .cta-secondary:hover { color: var(--fg); background: rgba(255,255,255,0.06); }
+
+  section { margin: 4rem 0; }
+  section h2 {
+    font-size: 1.5rem; font-weight: 600; margin-bottom: 1.25rem;
+    letter-spacing: -0.01em;
+  }
+
+  .platform-grid, .feature-grid {
+    display: grid;
+    gap: 0.85rem;
+  }
+  .platform-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .feature-grid  { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.25rem 1.4rem;
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+  .card h3 {
+    font-size: 1rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--fg);
+  }
+  .card .meta {
+    font-size: 0.82rem; color: var(--fg-3);
+    margin-bottom: 0.85rem;
+  }
+  .download-link {
+    display: block;
+    margin-top: 0.4rem;
+    padding: 0.55rem 0.7rem;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    word-break: break-all;
+    color: var(--accent);
+    transition: background 120ms ease;
+  }
+  .download-link:hover { background: rgba(79, 138, 255, 0.10); color: var(--accent-2); }
+
+  .feature p { color: var(--fg-2); font-size: 0.92rem; line-height: 1.55; }
+
+  footer {
+    margin: 5rem 0 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+    color: var(--fg-3); font-size: 0.85rem;
+    text-align: center;
+  }
+  footer a { color: var(--fg-2); }
+  footer a:hover { color: var(--accent); }
+  footer .mono { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="brand-mark">⚡ Nexray</div>
+  <div class="version-pill">${VERSION}</div>
+  <h1>Modern VLESS proxy client.</h1>
+  <p class="tagline">VLESS+REALITY and VLESS+WS+TLS only. Tray-app simple, kernel-grade fast.</p>
+  <div class="cta-row">
+    <a id="primary-cta" class="cta cta-primary" href="#downloads">Download</a>
+    <a class="cta cta-secondary" href="https://github.com/${PUBLISH_REPO}/releases">All releases</a>
+  </div>
+</header>
+
+<section id="downloads">
+  <h2>Download</h2>
+  <div class="platform-grid">
+    <div class="card" data-os="mac-arm">
+      <h3>macOS</h3>
+      <div class="meta">Apple Silicon · M-series</div>
+      <a class="download-link" href="${BASE}/${DMG_ARM}">${DMG_ARM}</a>
+    </div>
+    <div class="card" data-os="linux">
+      <h3>Linux</h3>
+      <div class="meta">x86_64 · Debian / Ubuntu</div>
+      <a class="download-link" href="${BASE}/${DEB}">${DEB}</a>
+    </div>
+    <div class="card" data-os="windows">
+      <h3>Windows</h3>
+      <div class="meta">x86_64 · NSIS installer</div>
+      <a class="download-link" href="${BASE}/${EXE}">${EXE}</a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Why Nexray</h2>
+  <div class="feature-grid">
+    <div class="card feature">
+      <h3>VLESS only</h3>
+      <p>Refuses VMess, Shadowsocks, Trojan, and every other legacy or insecure-by-default combination — by design.</p>
+    </div>
+    <div class="card feature">
+      <h3>Subscription import</h3>
+      <p>Paste any Shadowrocket-style subscription URL. Servers are grouped by source, latency-probed automatically, one-click-importable.</p>
+    </div>
+    <div class="card feature">
+      <h3>Smart routing</h3>
+      <p>Built-in <span class="meta" style="font-family: var(--mono);">geosite:cn</span> rules + your own <span class="meta" style="font-family: var(--mono);">rules.conf</span>. Domestic sites stay direct, ads blocked, everything else proxied.</p>
+    </div>
+    <div class="card feature">
+      <h3>System-wide via TUN</h3>
+      <p>Kernel-level packet capture for apps that ignore SOCKS. Safe-restore on quit — no orphaned routes.</p>
+    </div>
+    <div class="card feature">
+      <h3>Auto-pick best server</h3>
+      <p>Per-group "Auto" toggle keeps the active profile pinned to the lowest-latency server in your subscription, automatically.</p>
+    </div>
+    <div class="card feature">
+      <h3>Five languages</h3>
+      <p>English, 简体中文, 繁體中文, Русский. Auto-detected from your system, switchable in Settings.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Nexray <span class="mono">${VERSION}</span> · <a href="https://github.com/${PUBLISH_REPO}">GitHub</a> · GPL-3.0
+</footer>
+
+</div>
+
+<script>
+  // Best-effort OS detection so the primary CTA points at the right
+  // installer. Falls back to the #downloads anchor if anything we
+  // sniff is ambiguous — every link is on the page already so the
+  // user always has an out.
+  (function () {
+    var cta = document.getElementById("primary-cta");
+    if (!cta) return;
+    var BASE = "${BASE}";
+    var ua = navigator.userAgent || "";
+    var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+    var setCta = function (href, label) {
+      cta.href = href;
+      cta.textContent = label;
+    };
+
+    if (/Mac/i.test(platform) || /Mac OS X/i.test(ua)) {
+      // Only an Apple Silicon build is published; Intel-Mac visitors
+      // see the Apple Silicon CTA, but the in-page card list still
+      // shows what's actually available. (Future Intel build — drop
+      // the `bundles: dmg` slot back into the matrix and re-add the
+      // INTEL filename to the workflow.)
+      setCta(BASE + "/${DMG_ARM}", "Download for macOS (Apple Silicon)");
+    } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+      setCta(BASE + "/${EXE}", "Download for Windows");
+    } else if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
+      setCta(BASE + "/${DEB}", "Download for Linux (.deb)");
+    }
+  })();
+</script>
+</body>
+</html>

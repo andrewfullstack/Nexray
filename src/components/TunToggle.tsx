@@ -1,9 +1,11 @@
 import { useEffect } from "react";
+import { FormattedMessage, useIntl, type IntlShape } from "react-intl";
 import { useTunStore } from "../stores/tun";
 import { tauri } from "../lib/tauri";
 import { InfoTip } from "./InfoTip";
 
 export function TunToggle({ canEnable }: { canEnable: boolean }) {
+  const intl = useIntl();
   const { status, capabilities, busy, hydrate, pollStatus, enable, disable } =
     useTunStore();
 
@@ -51,7 +53,9 @@ export function TunToggle({ canEnable }: { canEnable: boolean }) {
       }}
     >
       <div>
-        <strong>TUN mode</strong>
+        <strong>
+          <FormattedMessage id="tun.heading" />
+        </strong>
         <span style={{ marginLeft: "0.4rem" }}>
           <InfoTip>
             <p className="heading">TUN mode</p>
@@ -94,7 +98,7 @@ export function TunToggle({ canEnable }: { canEnable: boolean }) {
           </InfoTip>
         </span>
         <p className="dim" style={{ margin: "0.25rem 0 0" }}>
-          <small>{tunSubtitle(status, capabilities)}</small>
+          <small>{tunSubtitle(intl, status, capabilities)}</small>
         </p>
         {status.lastError && status.state === "failed" && (
           <p className="error mono" style={{ margin: "0.25rem 0 0" }}>
@@ -108,28 +112,39 @@ export function TunToggle({ canEnable }: { canEnable: boolean }) {
         onClick={() => void handleToggle()}
         disabled={disabled}
       >
-        {isOn ? "Stop" : "Start"}
+        <FormattedMessage id={isOn ? "tun.stop" : "tun.start"} />
       </button>
     </div>
   );
 }
 
 function tunSubtitle(
+  intl: IntlShape,
   status: ReturnType<typeof useTunStore.getState>["status"],
   caps: ReturnType<typeof useTunStore.getState>["capabilities"],
 ): string {
-  if (caps && !caps.supported) return caps.reason ?? "TUN not supported";
+  if (caps && !caps.supported)
+    return (
+      caps.reason ?? intl.formatMessage({ id: "tun.subtitle.unsupported_default" })
+    );
   switch (status.state) {
     case "disabled":
-      return "Capture all system traffic via the proxy.";
+      return intl.formatMessage({ id: "tun.subtitle.disabled" });
     case "starting":
-      return "Starting tun2socks…";
+      return intl.formatMessage({ id: "tun.subtitle.starting" });
     case "active":
-      return `Active on ${status.interfaceName ?? "interface"}.`;
+      return intl.formatMessage(
+        { id: "tun.subtitle.active" },
+        {
+          iface:
+            status.interfaceName ??
+            intl.formatMessage({ id: "tun.subtitle.iface_default" }),
+        },
+      );
     case "stopping":
-      return "Tearing down…";
+      return intl.formatMessage({ id: "tun.subtitle.stopping" });
     case "failed":
-      return "Last attempt failed — see error below.";
+      return intl.formatMessage({ id: "tun.subtitle.failed" });
   }
 }
 

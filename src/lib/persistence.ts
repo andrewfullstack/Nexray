@@ -1,10 +1,29 @@
 import { Store } from "@tauri-apps/plugin-store";
+import { z } from "zod";
+import { isLocale, type Locale } from "../messages/catalogs";
 import type { Profile } from "./profile";
 import { ProfileSchema } from "./profile";
 
 const STORE_FILE = "nexray-state.json";
 const ACTIVE_KEY = "active-profile";
 const MANUAL_LIST_KEY = "manual-profiles";
+const PROFILE_GROUPS_KEY = "profile-groups";
+const GROUP_SETTINGS_KEY = "group-settings";
+const LOCALE_KEY = "ui-locale";
+
+/** Per-group UI behaviour. Owned by the React layer — Rust never reads it. */
+export interface GroupSettings {
+  /** When true, finishing a global Probe Latency sweep auto-switches the
+   *  active profile to the lowest-latency server within this group, but
+   *  only if the active profile already belongs to this group. The
+   *  one-active-group invariant prevents two enabled groups from fighting
+   *  over the active selection. */
+  autoSwitch: boolean;
+}
+
+const ProfileGroupsRecordSchema = z.record(z.string());
+const GroupSettingsSchema = z.object({ autoSwitch: z.boolean() }).strict();
+const GroupSettingsRecordSchema = z.record(GroupSettingsSchema);
 
 let cached: Promise<Store> | null = null;
 
@@ -79,6 +98,63 @@ export async function loadManualProfiles(): Promise<Profile[]> {
 export async function saveManualProfiles(profiles: Profile[]): Promise<void> {
   const store = await getStore();
   await store.set(MANUAL_LIST_KEY, profiles);
+  await store.save();
+}
+
+/**
+ * Load the profile-id → subscription-id membership map. Profiles not in
+ * this map are "ungrouped" (manually added or share-link imported).
+ * Returns an empty map when nothing is saved or the on-disk shape is
+ * invalid — better to demote to manual than lose the whole list.
+ */
+export async function loadProfileGroups(): Promise<Record<string, string>> {
+  const store = await getStore();
+  const raw = await store.get(PROFILE_GROUPS_KEY);
+  if (raw === undefined) return {};
+  const parsed = ProfileGroupsRecordSchema.safeParse(raw);
+  return parsed.success ? parsed.data : {};
+}
+
+export async function saveProfileGroups(
+  groups: Record<string, string>,
+): Promise<void> {
+  const store = await getStore();
+  await store.set(PROFILE_GROUPS_KEY, groups);
+  await store.save();
+}
+
+export async function loadGroupSettings(): Promise<Record<string, GroupSettings>> {
+  const store = await getStore();
+  const raw = await store.get(GROUP_SETTINGS_KEY);
+  if (raw === undefined) return {};
+  const parsed = GroupSettingsRecordSchema.safeParse(raw);
+  return parsed.success ? parsed.data : {};
+}
+
+export async function saveGroupSettings(
+  settings: Record<string, GroupSettings>,
+): Promise<void> {
+  const store = await getStore();
+  await store.set(GROUP_SETTINGS_KEY, settings);
+  await store.save();
+}
+
+/**
+ * Load the persisted UI locale. Returns `null` when nothing is saved yet
+ * (so the locale store can fall back to system-language detection on
+ * first launch) or when the on-disk value isn't one of our bundled
+ * locales.
+ */
+export async function loadLocale(): Promise<Locale | null> {
+  const store = await getStore();
+  const raw = await store.get(LOCALE_KEY);
+  if (raw === undefined) return null;
+  return isLocale(raw) ? raw : null;
+}
+
+export async function saveLocale(locale: Locale): Promise<void> {
+  const store = await getStore();
+  await store.set(LOCALE_KEY, locale);
   await store.save();
 }
 

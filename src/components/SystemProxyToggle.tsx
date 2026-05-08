@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FormattedMessage, useIntl } from "react-intl";
 import type { SystemProxyStatus } from "../lib/ipc";
 import { tauri } from "../lib/tauri";
 import { useTunStore } from "../stores/tun";
@@ -12,6 +13,7 @@ const initial: SystemProxyStatus = {
 };
 
 export function SystemProxyToggle({ canEnable }: { canEnable: boolean }) {
+  const intl = useIntl();
   const [status, setStatus] = useState<SystemProxyStatus>(initial);
   const [busy, setBusy] = useState(false);
 
@@ -57,8 +59,17 @@ export function SystemProxyToggle({ canEnable }: { canEnable: boolean }) {
   };
 
   const subtitle = status.enabled
-    ? `On — ${status.service ?? "active service"} → ${status.host}:${status.port}`
-    : "Route every proxy-aware app's traffic through Nexray.";
+    ? intl.formatMessage(
+        { id: "systemproxy.subtitle_active" },
+        {
+          service:
+            status.service ??
+            intl.formatMessage({ id: "systemproxy.active_service_default" }),
+          host: status.host ?? "",
+          port: status.port ?? "",
+        },
+      )
+    : intl.formatMessage({ id: "systemproxy.subtitle_off" });
 
   return (
     <div
@@ -71,7 +82,9 @@ export function SystemProxyToggle({ canEnable }: { canEnable: boolean }) {
       }}
     >
       <div>
-        <strong>System proxy</strong>
+        <strong>
+          <FormattedMessage id="systemproxy.heading" />
+        </strong>
         <span style={{ marginLeft: "0.4rem" }}>
           <InfoTip>
             <p className="heading">System proxy</p>
@@ -120,7 +133,9 @@ export function SystemProxyToggle({ canEnable }: { canEnable: boolean }) {
         onClick={() => void onToggle()}
         disabled={busy || (!status.enabled && !canEnable)}
       >
-        {status.enabled ? "Stop" : "Start"}
+        <FormattedMessage
+          id={status.enabled ? "systemproxy.stop" : "systemproxy.start"}
+        />
       </button>
     </div>
   );

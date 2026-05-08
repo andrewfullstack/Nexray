@@ -1,26 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { FormattedMessage } from "react-intl";
+import { FormattedMessage, useIntl } from "react-intl";
+import { Trash2 } from "lucide-react";
+import { IconButton } from "../components/IconButton";
 import { type RoutingPreset } from "../lib/ipc";
 import type { ParsedRule, RuleDestination, RuleMatcherType } from "../lib/rules-conf";
 import { useRoutingStore } from "../stores/routing";
 import { useRulesFileStore } from "../stores/rulesFile";
 
-const PRESETS: { id: RoutingPreset; label: string; help: string }[] = [
-  {
-    id: "default",
-    label: "Default",
-    help: "Apply the rules file first, then fall back: CN sites + private IPs go direct, ads blocked, rest proxied.",
-  },
-  {
-    id: "direct",
-    label: "Direct",
-    help: "Kill-switch: everything direct. Block rules in the rules file still fire (ad filtering); direct/proxy rules in the file are ignored.",
-  },
-  {
-    id: "global",
-    label: "Global proxy",
-    help: "Kill-switch: everything through the proxy, including .cn domains. Block rules in the rules file still fire; direct/proxy rules in the file are ignored.",
-  },
+interface PresetSpec {
+  id: RoutingPreset;
+  labelId: string;
+  helpId: string;
+}
+
+const PRESETS: PresetSpec[] = [
+  { id: "default", labelId: "routing.preset.default_label", helpId: "routing.preset.default_help" },
+  { id: "direct",  labelId: "routing.preset.direct_label",  helpId: "routing.preset.direct_help"  },
+  { id: "global",  labelId: "routing.preset.global_label",  helpId: "routing.preset.global_help"  },
 ];
 
 const DESTINATIONS: RuleDestination[] = ["direct", "proxy", "block"];
@@ -79,7 +75,12 @@ export function Routing() {
     }
   };
 
-  if (loading || rulesLoading) return <p className="dim">Loading routing…</p>;
+  if (loading || rulesLoading)
+    return (
+      <p className="dim">
+        <FormattedMessage id="routing.loading" />
+      </p>
+    );
 
   return (
     <>
@@ -93,16 +94,18 @@ export function Routing() {
             className="row"
             style={{ justifyContent: "space-between", alignItems: "baseline" }}
           >
-            <span className="label">Fallback preset</span>
-            {presetFlashVisible && <span className="flash ok">Applied.</span>}
+            <span className="label">
+              <FormattedMessage id="routing.preset_label" />
+            </span>
+            {presetFlashVisible && (
+              <span className="flash ok">
+                <FormattedMessage id="routing.preset_applied" />
+              </span>
+            )}
           </div>
           <p className="dim" style={{ margin: "0 0 0.5rem" }}>
             <small>
-              Click a preset to apply it immediately — if a profile is
-              connected, xray reloads in place. The fallback preset runs{" "}
-              <em>after</em> all rules in <code>rules.conf</code>; Xray uses
-              first-match-wins, so rules in the file take priority and the
-              preset catches whatever they don&apos;t match.
+              <FormattedMessage id="routing.preset_help" />
             </small>
           </p>
           <div className="preset-grid">
@@ -122,9 +125,13 @@ export function Routing() {
                     }}
                     className="sr-only"
                   />
-                  <strong>{p.label}</strong>
+                  <strong>
+                    <FormattedMessage id={p.labelId} />
+                  </strong>
                   <span className="dim">
-                    <small>{p.help}</small>
+                    <small>
+                      <FormattedMessage id={p.helpId} />
+                    </small>
                   </span>
                 </label>
               );
@@ -141,13 +148,15 @@ export function Routing() {
           onClick={() => setShowAdvanced((v) => !v)}
           style={{ width: "100%", textAlign: "left" }}
         >
-          {showAdvanced ? "▾ Advanced (DNS)" : "▸ Advanced (DNS)"}
+          <FormattedMessage
+            id={showAdvanced ? "routing.advanced_open" : "routing.advanced_closed"}
+          />
         </button>
         {showAdvanced && (
           <div style={{ marginTop: "1rem" }}>
             <div className="field">
               <label className="label" htmlFor="dns-domestic">
-                Domestic resolver (geosite:cn)
+                <FormattedMessage id="routing.dns.domestic_label" />
               </label>
               <input
                 id="dns-domestic"
@@ -159,7 +168,7 @@ export function Routing() {
             </div>
             <div className="field">
               <label className="label" htmlFor="dns-proxy">
-                Proxy resolver (everything else)
+                <FormattedMessage id="routing.dns.proxy_label" />
               </label>
               <input
                 id="dns-proxy"
@@ -171,8 +180,7 @@ export function Routing() {
             </div>
             <p className="dim">
               <small>
-                System DNS leaks are blocked unconditionally — these resolvers
-                are the only DNS servers xray-core consults.
+                <FormattedMessage id="routing.dns.help" />
               </small>
             </p>
           </div>
@@ -180,15 +188,21 @@ export function Routing() {
       </div>
 
       <div className="card row" style={{ justifyContent: "space-between" }}>
-        <button onClick={() => reset()}>Reset preset + DNS</button>
+        <button onClick={() => reset()}>
+          <FormattedMessage id="routing.reset_button" />
+        </button>
         <div className="row">
-          {savedFlash && <span className="flash ok">Saved.</span>}
+          {savedFlash && (
+            <span className="flash ok">
+              <FormattedMessage id="routing.saved_flash" />
+            </span>
+          )}
           <button
             className="primary"
             onClick={() => void handleSavePresetAndDns()}
             disabled={!dirty}
           >
-            Save DNS
+            <FormattedMessage id="routing.save_dns_button" />
           </button>
         </div>
       </div>
@@ -210,6 +224,7 @@ function RulesFileCard() {
     resetToDefault,
     saveRaw,
   } = useRulesFileStore();
+  const intl = useIntl();
 
   const [matcherType, setMatcherType] = useState<RuleMatcherType>("domain-suffix");
   const [matcher, setMatcher] = useState("");
@@ -246,35 +261,52 @@ function RulesFileCard() {
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <strong>Rules file ({parsed.totalRules} rules)</strong>
+        <strong>
+          <FormattedMessage
+            id="routing.rules.title"
+            values={{ count: parsed.totalRules }}
+          />
+        </strong>
         <div className="row" style={{ gap: "0.5rem" }}>
           <button onClick={() => setShowRaw((v) => !v)}>
-            {showRaw ? "Hide editor" : "Edit raw"}
+            <FormattedMessage
+              id={showRaw ? "routing.rules.hide_editor" : "routing.rules.edit_raw"}
+            />
           </button>
           <button
             onClick={() => {
-              if (window.confirm("Reset rules.conf to the bundled default?")) {
-                void resetToDefault();
-              }
+              const ok = window.confirm(
+                intl.formatMessage({ id: "routing.rules.reset_confirm" }),
+              );
+              if (ok) void resetToDefault();
             }}
           >
-            Reset to default
+            <FormattedMessage id="routing.rules.reset_default" />
           </button>
         </div>
       </div>
 
       <p className="dim" style={{ margin: "0.4rem 0 1rem" }}>
         <small>
-          Stored at <code>~/Library/Application Support/dev.nexray.app/rules.conf</code>{" "}
-          (path varies by OS). Disabled lines start with <code>#</code>.
-          {parsed.disabledCount > 0 && ` ${parsed.disabledCount} disabled.`}
+          <FormattedMessage id="routing.rules.disabled_lines" />{" "}
+          <code>#</code>.
+          {parsed.disabledCount > 0 && (
+            <>
+              {" "}
+              <FormattedMessage
+                id="routing.rules.disabled_count"
+                values={{ count: parsed.disabledCount }}
+              />
+            </>
+          )}
           {parsed.unsupportedCount > 0 && (
             <>
               {" "}
               <span style={{ color: "var(--yellow)" }}>
-                {parsed.unsupportedCount} rules use unsupported types
-                (IP-ASN / USER-AGENT / AND); they round-trip but won&apos;t
-                be applied by xray.
+                <FormattedMessage
+                  id="routing.rules.unsupported_count"
+                  values={{ count: parsed.unsupportedCount }}
+                />
               </span>
             </>
           )}
@@ -290,13 +322,17 @@ function RulesFileCard() {
             style={{ minHeight: "20rem", fontSize: "0.9em" }}
           />
           <div className="row" style={{ marginTop: "0.5rem", justifyContent: "flex-end" }}>
-            {savedFlash && <span className="flash ok">Saved.</span>}
+            {savedFlash && (
+              <span className="flash ok">
+                <FormattedMessage id="routing.saved_flash" />
+              </span>
+            )}
             <button
               className="primary"
               onClick={() => void handleSaveRaw()}
               disabled={draft === contents}
             >
-              Save file
+              <FormattedMessage id="routing.rules.save_file" />
             </button>
           </div>
         </>
@@ -351,7 +387,7 @@ function RulesFileCard() {
           onClick={() => void handleAdd()}
           disabled={matcherType !== "final" && matcher.trim().length === 0}
         >
-          Add rule
+          <FormattedMessage id="routing.rules.add_rule" />
         </button>
       </div>
 
@@ -373,11 +409,12 @@ function RulesTable({
   onDestinationChange,
   onDelete,
 }: RulesTableProps) {
+  const intl = useIntl();
   if (rules.length === 0) {
     return (
       <p className="dim">
         <small>
-          No rules. Add one below or click &ldquo;Edit raw&rdquo;.
+          <FormattedMessage id="routing.rules.empty" />
         </small>
       </p>
     );
@@ -401,9 +438,15 @@ function RulesTable({
           }}
         >
           <tr style={{ textAlign: "left" }}>
-            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>on</th>
-            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>type</th>
-            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>matcher</th>
+            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
+              <FormattedMessage id="routing.rules.col_on" />
+            </th>
+            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
+              <FormattedMessage id="routing.rules.col_type" />
+            </th>
+            <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
+              <FormattedMessage id="routing.rules.col_matcher" />
+            </th>
             <th style={{ padding: "0.5rem 0.4rem", color: "var(--fg-2)", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>→</th>
             <th style={{ padding: "0.5rem 0.4rem" }}></th>
           </tr>
@@ -422,7 +465,13 @@ function RulesTable({
                 {r.matcherType}
               </td>
               <td style={{ padding: "0.4rem", wordBreak: "break-all" }}>
-                {r.matcherType === "final" ? <em className="dim">(catch-all)</em> : r.matcher}
+                {r.matcherType === "final" ? (
+                  <em className="dim">
+                    <FormattedMessage id="routing.rules.catchall" />
+                  </em>
+                ) : (
+                  r.matcher
+                )}
                 {r.noResolve && (
                   <span className="dim" style={{ marginLeft: "0.4rem" }}>
                     no-resolve
@@ -455,9 +504,14 @@ function RulesTable({
                 </select>
               </td>
               <td style={{ padding: "0.4rem" }}>
-                <button className="danger" onClick={() => onDelete(r.index)}>
-                  Delete
-                </button>
+                <IconButton
+                  danger
+                  onClick={() => onDelete(r.index)}
+                  ariaLabel={intl.formatMessage({ id: "routing.rules.delete_rule" })}
+                  title={intl.formatMessage({ id: "routing.rules.delete_rule" })}
+                >
+                  <Trash2 size={14} strokeWidth={2.2} />
+                </IconButton>
               </td>
             </tr>
           ))}

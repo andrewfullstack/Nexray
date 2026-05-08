@@ -475,6 +475,83 @@ fn rule_to_xray(r: &ParsedRule) -> Result<Value, &'static str> {
         }
         RuleKind::IpAsn(_) => Err("IP-ASN: xray-core has no native ASN matcher"),
         RuleKind::UserAgent(_) => Err("USER-AGENT: xray-core has no native UA matcher"),
+        // The AND combinator has no general analogue in xray (rule fields
+        // within a single rule are already implicitly AND'd, but xray
+        // can't OR rules, and Shadowrocket's nested AND is more
+        // expressive than that). However the canonical "block QUIC"
+        // idiom — `AND,((PROTOCOL,UDP),(DEST-PORT,443)),REJECT` — does
+        // collapse cleanly into one flat xray rule (`network: udp` +
+        // `port: 443`), and that's by far the most common use of AND in
+        // real Shadowrocket configs. Recognise that exact shape; punt
+        // anything else.
+        RuleKind::Other { kw, rest } if kw.eq_ignore_ascii_case("AND") => {
+            try_translate_and_protocol_port(rest, outbound)
+                .ok_or("AND: only the (PROTOCOL,*),(DEST-PORT,*) shape is translatable to xray")
+        }
         RuleKind::Other { .. } => Err("rule type not supported by xray-core"),
     }
+}
+
+/// Recognise `((PROTOCOL,X),(DEST-PORT,Y)),POLICY` (or with the two
+/// inner clauses swapped) inside an `AND,…` rule's `rest`. Returns the
+/// equivalent flat xray routing rule when matched, `None` otherwise —
+/// callers fall back to the standard "unsupported" skip reason for any
+/// shape we don't grok.
+fn try_translate_and_protocol_port(rest: &str, outbound: &str) -> Option<Value> {
+    // `rest` looks like `((PROTOCOL,UDP),(DEST-PORT,443)),REJECT-NO-DROP`
+    // — chop off the trailing `,POLICY`. Use rsplit so commas inside the
+    // parens don't confuse us.
+    let body = rest.rsplit_once(',').map(|(head, _)| head)?.trim();
+    // body should be `((PROTOCOL,UDP),(DEST-PORT,443))`. Strip outer pair.
+    let inner = strip_outer_parens(body)?;
+    // Split on the single top-level comma between `)(`.
+    let (a, b) = split_top_level_comma(inner)?;
+    let (ka, va) = parse_paren_pair(a)?;
+    let (kb, vb) = parse_paren_pair(b)?;
+    let (proto, port) = match (
+        ka.to_ascii_uppercase().as_str(),
+        kb.to_ascii_uppercase().as_str(),
+    ) {
+        ("PROTOCOL", "DEST-PORT") => (va, vb),
+        ("DEST-PORT", "PROTOCOL") => (vb, va),
+        _ => return None,
+    };
+    let proto = proto.to_ascii_lowercase();
+    if proto != "udp" && proto != "tcp" {
+        return None;
+    }
+    Some(json!({
+        "type": "field",
+        "network": proto,
+        "port": port,
+        "outboundTag": outbound,
+    }))
+}
+
+fn strip_outer_parens(s: &str) -> Option<&str> {
+    let s = s.trim();
+    if s.len() >= 2 && s.starts_with('(') && s.ends_with(')') {
+        Some(&s[1..s.len() - 1])
+    } else {
+        None
+    }
+}
+
+fn split_top_level_comma(s: &str) -> Option<(&str, &str)> {
+    let mut depth: i32 = 0;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => return Some((&s[..i], &s[i + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_paren_pair(s: &str) -> Option<(&str, &str)> {
+    let inner = strip_outer_parens(s.trim())?;
+    let (k, v) = inner.split_once(',')?;
+    Some((k.trim(), v.trim()))
 }

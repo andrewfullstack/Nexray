@@ -112,6 +112,43 @@ fn translate_emits_xray_routing_rules() {
 }
 
 #[test]
+fn translates_quic_block_and_pattern() {
+    // Enabled `AND,((PROTOCOL,UDP),(DEST-PORT,443)),REJECT-NO-DROP` —
+    // the canonical Shadowrocket "block QUIC" idiom. We collapse it
+    // into a single xray rule with `network` + `port` since xray's
+    // per-rule fields are conjunctive.
+    let src = "[Rule]\nAND,((PROTOCOL,UDP),(DEST-PORT,443)),REJECT-NO-DROP\n";
+    let conf = parse(src);
+    let result = translate(&conf);
+    assert!(
+        result.skipped.is_empty(),
+        "expected no skipped rules, got {:?}",
+        result.skipped,
+    );
+    assert_eq!(result.rules.len(), 1);
+    let json = serde_json::to_string(&result.rules[0]).expect("serialize");
+    assert!(json.contains("\"network\":\"udp\""), "got: {json}");
+    assert!(json.contains("\"port\":\"443\""), "got: {json}");
+    assert!(json.contains("\"outboundTag\":\"block\""), "got: {json}");
+
+    // Reverse ordering of the two inner clauses must produce the same
+    // output — Shadowrocket users write either form interchangeably.
+    let swapped = "[Rule]\nAND,((DEST-PORT,443),(PROTOCOL,UDP)),REJECT\n";
+    let result = translate(&parse(swapped));
+    assert!(result.skipped.is_empty());
+    let json = serde_json::to_string(&result.rules[0]).expect("serialize");
+    assert!(json.contains("\"network\":\"udp\""));
+    assert!(json.contains("\"port\":\"443\""));
+
+    // Anything else starting with AND still falls through to the
+    // unsupported-skip reason.
+    let unhandled = "[Rule]\nAND,((DOMAIN-SUFFIX,foo.com),(DEST-PORT,443)),PROXY\n";
+    let result = translate(&parse(unhandled));
+    assert!(result.rules.is_empty());
+    assert!(result.skipped.iter().any(|s| s.reason.starts_with("AND:")));
+}
+
+#[test]
 fn parses_real_default_conf() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

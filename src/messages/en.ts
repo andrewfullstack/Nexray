@@ -1,24 +1,237 @@
 /**
- * English (en) translation catalog. Add new IDs here AND in any locale files.
- * Per DEVELOPMENT.md §11 — UI strings must go through react-intl from day 1.
+ * English (en) translation catalog. The canonical superset — every other
+ * locale file in this directory must export the same set of keys, or
+ * react-intl will fall back to the raw id at runtime. The catalogs index
+ * (`./catalogs.ts`) lists which locales are bundled.
+ *
+ * Per DEVELOPMENT.md §11 — UI strings must go through react-intl from
+ * day 1. The catalogs are flat string maps so adding a key is a one-line
+ * PR.
  */
 export const en: Record<string, string> = {
   "app.title": "Nexray",
+
   "nav.home": "Connection",
   "nav.servers": "Servers",
+  "nav.subscriptions": "Subscriptions",
+  "nav.routing": "Routing",
+  "nav.settings": "Settings",
 
   "status.disconnected": "Disconnected",
   "status.connecting": "Connecting…",
   "status.connected": "Connected",
   "status.crashed": "Crashed",
 
+  "common.dismiss": "Dismiss",
+  "common.more_info": "More info",
+
   "home.connect": "Connect",
   "home.disconnect": "Disconnect",
+  "home.connecting": "Connecting…",
+  "home.disconnecting": "Disconnecting…",
   "home.no_profile": "No active server. Open the Servers tab to add one.",
   "home.uplink": "Up",
   "home.downlink": "Down",
   "home.profile_summary": "{kind} · {endpoint}",
   "home.last_error": "Last error: {error}",
+  "home.profile.switch_aria":
+    "Switch active server (auto-reconnects if connected)",
+  "home.profile.manage": "manage",
+  "home.profile.from_pool": "{name} (from pool)",
+  "home.profile.switching": "Switching to {address}:{port}…",
+  "home.profile.connect_to_route":
+    "Click Connect to route through {address}:{port}.",
+  "home.profile.live_on":
+    "Connected to {address}:{port} on Proxy socks5://{proxyHost}:{proxyPort}",
+  "home.profile.reconnecting":
+    "Reconnecting — backend still on the previous server",
+  "home.error.xray_reported": "xray reported:",
+  "home.error.connect_failed": "Connect failed:",
+  "home.stats.unavailable":
+    "Stats API not reachable yet — counters appear once xray finishes starting.",
+  "home.stats.total_suffix": "total",
+  "home.egress.heading": "Egress IP",
+  "home.egress.refresh": "Refresh",
+  "home.egress.checking": "Checking…",
+  "home.egress.help":
+    "Your apparent IP through the proxy. Refresh after switching servers to confirm the route changed.",
+  "home.egress.placeholder_offline": "(connect to probe)",
+  "home.egress.last_n": "Last {n} unique egresses",
+  "home.egress.fail": "check failed",
+
+  "subscriptions.heading": "Subscriptions",
+  "subscriptions.url_label": "Subscription URL (https://)",
+  "subscriptions.url_placeholder": "https://your-airport.example/sub",
+  "subscriptions.name_label": "Name (optional)",
+  "subscriptions.name_placeholder": "my airport",
+  "subscriptions.add": "Add subscription",
+  "subscriptions.adding": "Adding…",
+  "subscriptions.loading": "Loading…",
+  "subscriptions.empty": "No subscriptions yet. Add one above.",
+  "subscriptions.refresh_aria": "Refresh subscription",
+  "subscriptions.refresh_title":
+    "Re-fetch this subscription's body and reclassify its servers",
+  "subscriptions.delete_aria": "Delete subscription",
+  "subscriptions.delete_title":
+    "Delete this subscription (imported servers stay in the Servers list as manual entries)",
+  "subscriptions.accepted_label": "Accepted:",
+  "subscriptions.skipped_label": "Skipped:",
+  "subscriptions.fetched_relative": "Fetched {when}",
+  "subscriptions.not_fetched": "Not fetched yet",
+  "subscriptions.refresh_failed": "Last refresh failed: {error}",
+  "subscriptions.show_servers_button": "Show servers ({count})",
+  "subscriptions.hide_servers_button": "Hide servers ({count})",
+  "subscriptions.show_servers_title": "Show servers",
+  "subscriptions.hide_servers_title": "Hide servers",
+  "subscriptions.import_all": "Import all ({count})",
+  "subscriptions.import_all_done": "All imported",
+  "subscriptions.importing": "Importing…",
+  "subscriptions.import_all_title_done":
+    "Every server in this subscription is already in your Servers list",
+  "subscriptions.import_all_title": "Add {count} new servers to the Servers list",
+  "subscriptions.in_servers": "● in servers",
+  "subscriptions.flash_added": "✓ added",
+  "subscriptions.flash_exists": "already imported",
+  "subscriptions.flash_error": "import failed",
+  "subscriptions.import_button": "Import",
+  "subscriptions.imported_button": "Saved",
+  "subscriptions.import_title_already":
+    "This server is already in your Servers list",
+  "subscriptions.import_title_add": "Add to the Servers list",
+  "subscriptions.use_button": "Use",
+  "subscriptions.use_title": "Import and switch to this server",
+  "subscriptions.rel.just_now": "just now",
+  "subscriptions.rel.minutes_ago": "{n}m ago",
+  "subscriptions.rel.hours_ago": "{n}h ago",
+
+  "routing.heading": "Routing",
+  "routing.loading": "Loading routing…",
+  "routing.preset_label": "Fallback preset",
+  "routing.preset_help":
+    "Pick a preset; it applies right away. Custom rules in rules.conf always run first — the preset handles whatever they don't match.",
+  "routing.preset_applied": "Applied.",
+  "routing.preset.default_label": "Default",
+  "routing.preset.default_help":
+    "Smart routing: Domestic sites bypass the proxy, everything else proxied, ads blocked.",
+  "routing.preset.direct_label": "Direct",
+  "routing.preset.direct_help":
+    "All traffic direct (no proxy). Ad blocking still works.",
+  "routing.preset.global_label": "Global proxy",
+  "routing.preset.global_help":
+    "All traffic through the proxy. Ad blocking still works.",
+  "routing.advanced_open": "▾ Advanced (DNS)",
+  "routing.advanced_closed": "▸ Advanced (DNS)",
+  "routing.dns.domestic_label": "Domestic resolver (geosite:cn)",
+  "routing.dns.proxy_label": "Proxy resolver (everything else)",
+  "routing.dns.help":
+    "Only these resolvers are used. System DNS is bypassed to prevent leaks.",
+  "routing.reset_button": "Reset preset + DNS",
+  "routing.save_dns_button": "Save DNS",
+  "routing.saved_flash": "Saved.",
+  "routing.rules.title": "Rules file ({count} rules)",
+  "routing.rules.edit_raw": "Edit raw",
+  "routing.rules.hide_editor": "Hide editor",
+  "routing.rules.reset_default": "Reset to default",
+  "routing.rules.reset_confirm": "Reset rules.conf to the bundled default?",
+  "routing.rules.disabled_lines": "Disabled lines start with",
+  "routing.rules.disabled_count": "{count} disabled.",
+  "routing.rules.unsupported_count":
+    "{count} rules use types xray won't apply (IP-ASN / USER-AGENT / AND).",
+  "routing.rules.empty": 'No rules. Add one below or click "Edit raw".',
+  "routing.rules.save_file": "Save file",
+  "routing.rules.add_rule": "Add rule",
+  "routing.rules.col_on": "on",
+  "routing.rules.col_type": "type",
+  "routing.rules.col_matcher": "matcher",
+  "routing.rules.delete_rule": "Delete rule",
+  "routing.rules.catchall": "(catch-all)",
+
+  "servers.heading": "Servers",
+  "servers.loading": "Loading servers…",
+  "servers.probe_latency": "Probe latency",
+  "servers.probing": "Probing…",
+  "servers.probe_latency_help":
+    "TCP-connect to each server's address:port and report the round-trip latency.",
+  "servers.add_server": "+ Add server",
+  "servers.help":
+    "Click a row to make it active. Servers imported from a subscription appear under their subscription's group; turn on Auto on a group to keep the active server pinned to that group's lowest-latency member after every probe.",
+  "servers.empty": "No saved servers yet.",
+  "servers.empty_add_first": "Add your first one",
+  "servers.empty_or_import": ", or import servers from a {link}.",
+  "servers.empty_subscription_link": "subscription",
+  "servers.no_servers_in_group": "No servers in this group.",
+  "servers.group_unknown": "Subscription {id}",
+  "servers.group_manual": "Manual servers",
+  "servers.mode.manual": "Manual",
+  "servers.mode.auto": "Auto",
+  "servers.mode.aria": "Group selection mode",
+  "servers.mode.manual_help": "You pick which server in this group is active",
+  "servers.mode.auto_help":
+    "After every probe, switch to this group's lowest-latency server (only when the active profile is in this group)",
+  "servers.pick_best_aria": "Pick best server",
+  "servers.pick_best_title_idle":
+    "Probe every server in this group and switch to the lowest-latency one",
+  "servers.pick_best_title_busy": "Probing this group…",
+  "servers.delete_group_aria": "Delete group",
+  "servers.delete_group_title":
+    "Remove every server in this group (the subscription URL stays)",
+  "servers.delete_server_aria": "Delete server",
+  "servers.delete_server_title": "Delete this server",
+  "servers.expand_title": "Click to expand",
+  "servers.collapse_title": "Click to collapse",
+  "servers.active_title": "Active: {name}",
+  "servers.row.active": "● active",
+  "servers.row.edit": "Edit",
+  "servers.ping.timeout": "timeout",
+  "servers.ping.timeout_title": "TCP connect timed out or DNS failed",
+  "servers.ping.ms": "{ms} ms",
+
+  "addserver.heading.share_link": "Import from share link",
+  "addserver.heading.json": "Import from JSON config",
+  "addserver.help.share_link":
+    "Paste a vless:// link to autofill the form. Other schemes (vmess, ss, trojan, ...) are rejected.",
+  "addserver.help.json":
+    "Paste a Shadowrocket-style server JSON. Only VLESS+WebSocket+TLS (cdn-ws) and VLESS+REALITY survive validation; anything else is rejected with a structured reason.",
+  "addserver.import_button": "Import",
+  "addserver.import_json_button": "Import JSON",
+  "addserver.parse_failed": "Could not parse: {reason}",
+  "addserver.json_parse_failed": "Could not import: {reason}",
+  "addserver.save_button": "Save server",
+  "addserver.saved_flash": "Saved.",
+  "addserver.valid_hint": "Form is valid — ready to save.",
+  "addserver.invalid_hint": "Fill in all required fields to enable Save.",
+
+  "settings.heading": "Settings",
+  "settings.about": "About",
+  "settings.language": "Language",
+  "settings.language_help":
+    "Choose the interface language. Takes effect immediately.",
+  "settings.loading": "Loading…",
+  "settings.auto_update": "Auto-update",
+  "settings.auto_update_help":
+    "Check for new releases on startup and prompt to install. Off by default; the app never phones home unless you enable this.",
+  "settings.field.name": "Name",
+  "settings.field.version": "Version",
+  "settings.field.platform": "Platform",
+
+  "systemproxy.heading": "System proxy",
+  "systemproxy.subtitle_off":
+    "Route every proxy-aware app's traffic through Nexray.",
+  "systemproxy.subtitle_active": "On — {service} → {host}:{port}",
+  "systemproxy.active_service_default": "active service",
+  "systemproxy.start": "Start",
+  "systemproxy.stop": "Stop",
+
+  "tun.heading": "TUN mode",
+  "tun.subtitle.disabled": "Capture all system traffic via the proxy.",
+  "tun.subtitle.starting": "Starting tun2socks…",
+  "tun.subtitle.active": "Active on {iface}.",
+  "tun.subtitle.iface_default": "interface",
+  "tun.subtitle.stopping": "Tearing down…",
+  "tun.subtitle.failed": "Last attempt failed — see error below.",
+  "tun.subtitle.unsupported_default": "TUN not supported",
+  "tun.start": "Start",
+  "tun.stop": "Stop",
 
   "profile.editor_title": "Profile",
   "profile.paste_label": "Paste a vless:// share link",

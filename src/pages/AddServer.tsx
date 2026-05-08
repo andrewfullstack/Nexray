@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { FormattedMessage } from "react-intl";
 import { decodeShadowrocketJson } from "../lib/import-json";
 import { decodeShareLink } from "../lib/share-link";
 import {
@@ -283,19 +284,23 @@ export function AddServer() {
       >
         <span className="dim">
           <small>
-            {valid
-              ? "Form is valid — ready to save."
-              : "Fill in all required fields to enable Save."}
+            <FormattedMessage
+              id={valid ? "addserver.valid_hint" : "addserver.invalid_hint"}
+            />
           </small>
         </span>
         <div className="row">
-          {savedFlash && <span className="flash ok">Saved.</span>}
+          {savedFlash && (
+            <span className="flash ok">
+              <FormattedMessage id="addserver.saved_flash" />
+            </span>
+          )}
           <button
             className="primary"
             onClick={() => void handleSave()}
             disabled={!valid}
           >
-            Save server
+            <FormattedMessage id="addserver.save_button" />
           </button>
         </div>
       </div>
@@ -303,11 +308,12 @@ export function AddServer() {
       {error && <div className="flash err">{error}</div>}
 
       <div className="card">
-        <strong>Import from share link</strong>
+        <strong>
+          <FormattedMessage id="addserver.heading.share_link" />
+        </strong>
         <p className="dim" style={{ margin: "0.4rem 0 0.5rem" }}>
           <small>
-            Paste a <code>vless://</code> link to autofill the form. Other
-            schemes (vmess, ss, trojan, ...) are rejected.
+            <FormattedMessage id="addserver.help.share_link" />
           </small>
         </p>
         <textarea
@@ -317,22 +323,27 @@ export function AddServer() {
           style={{ minHeight: "5rem" }}
         />
         {importError && (
-          <div className="flash err">Could not parse: {importError}</div>
+          <div className="flash err">
+            <FormattedMessage
+              id="addserver.parse_failed"
+              values={{ reason: importError }}
+            />
+          </div>
         )}
         <div className="row" style={{ justifyContent: "flex-end", marginTop: "0.5rem" }}>
           <button onClick={handleImport} disabled={!importText.trim()}>
-            Import
+            <FormattedMessage id="addserver.import_button" />
           </button>
         </div>
       </div>
 
       <div className="card">
-        <strong>Import from JSON config</strong>
+        <strong>
+          <FormattedMessage id="addserver.heading.json" />
+        </strong>
         <p className="dim" style={{ margin: "0.4rem 0 0.5rem" }}>
           <small>
-            Paste a Shadowrocket-style server JSON. Only VLESS+WebSocket+TLS
-            (cdn-ws) and VLESS+REALITY survive validation; anything else is
-            rejected with a structured reason.
+            <FormattedMessage id="addserver.help.json" />
           </small>
         </p>
         <textarea
@@ -343,11 +354,16 @@ export function AddServer() {
           spellCheck={false}
         />
         {jsonError && (
-          <div className="flash err">Could not import: {jsonError}</div>
+          <div className="flash err">
+            <FormattedMessage
+              id="addserver.json_parse_failed"
+              values={{ reason: jsonError }}
+            />
+          </div>
         )}
         <div className="row" style={{ justifyContent: "flex-end", marginTop: "0.5rem" }}>
           <button onClick={handleImportJson} disabled={!jsonText.trim()}>
-            Import JSON
+            <FormattedMessage id="addserver.import_json_button" />
           </button>
         </div>
       </div>

@@ -10,16 +10,29 @@ import { Settings } from "./pages/Settings";
 import { Subscriptions } from "./pages/Subscriptions";
 import { useProfileStore } from "./stores/profile";
 import { useConnectionStore } from "./stores/connection";
+import { useSubscriptionsStore } from "./stores/subscriptions";
+import { useLocaleStore } from "./stores/locale";
 import { tauri } from "./lib/tauri";
 
 export function App() {
   const hydrate = useProfileStore((s) => s.hydrate);
+  const refreshSubs = useSubscriptionsStore((s) => s.refresh);
+  const hydrateLocale = useLocaleStore((s) => s.hydrate);
   const startPolling = useConnectionStore((s) => s.startPolling);
   const stopPolling = useConnectionStore((s) => s.stopPolling);
 
   useEffect(() => {
     void hydrate();
-  }, [hydrate]);
+    // Prime the subscription list at startup so the Servers page can
+    // render group headers (subscription name, auto-switch state) on
+    // first paint without waiting for a Subscriptions-tab visit.
+    void refreshSubs();
+    // Hydrate the persisted UI locale before any FormattedMessage
+    // renders are read by the user. The provider falls back to English
+    // until this resolves; in practice the resolution is faster than
+    // first paint so the flash is invisible.
+    void hydrateLocale();
+  }, [hydrate, refreshSubs, hydrateLocale]);
 
   useEffect(() => {
     startPolling();

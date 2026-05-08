@@ -85,7 +85,15 @@ export function parseRulesConf(text: string): ParseStats {
     const parsed = parseRuleLine(body, enabled, raw, rules.length);
     if (parsed) {
       if (!enabled) disabled++;
-      if (parsed.matcherType === "other" || parsed.matcherType === "ip-asn" || parsed.matcherType === "user-agent") {
+      // Only flag *enabled* unsupported rules — a commented-out IP-ASN
+      // line can't affect routing, so warning about it is noise. The
+      // canonical "block QUIC" AND idiom does translate (Rust side has
+      // a special-case translator), so don't classify it as unsupported.
+      const isUnsupported =
+        parsed.matcherType === "ip-asn" ||
+        parsed.matcherType === "user-agent" ||
+        (parsed.matcherType === "other" && !isAndProtocolPortShape(body));
+      if (parsed.enabled && isUnsupported) {
         unsupported++;
       }
       rules.push(parsed);
@@ -98,6 +106,17 @@ export function parseRulesConf(text: string): ParseStats {
     disabledCount: disabled,
     unsupportedCount: unsupported,
   };
+}
+
+/// Recognise the canonical "block QUIC" AND idiom — `AND,((PROTOCOL,*),
+/// (DEST-PORT,*)),POLICY`, with either ordering of the two inner
+/// clauses. The Rust translator collapses this shape into a flat xray
+/// rule (`network` + `port`), so for UI-counting purposes it's
+/// "supported". Anything else starting with `AND,` is still untranslatable.
+function isAndProtocolPortShape(body: string): boolean {
+  return /^AND,\s*\(\s*\(\s*(?:PROTOCOL|DEST-PORT)\s*,[^)]+\)\s*,\s*\(\s*(?:PROTOCOL|DEST-PORT)\s*,[^)]+\)\s*\)\s*,/i.test(
+    body,
+  );
 }
 
 function looksLikeRule(s: string): boolean {

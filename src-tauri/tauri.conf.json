@@ -15,7 +15,7 @@
         "label": "main",
         "title": "",
         "width": 1024,
-        "height": 720,
+        "height": 820,
         "minWidth": 880,
         "minHeight": 620,
         "resizable": true,
@@ -32,7 +32,7 @@
       "active": false,
       "dialog": false,
       "endpoints": [
-        "https://github.com/REPLACE_ME_org/nexray/releases/latest/download/latest.json"
+        "https://github.com/andrewfullstack/Nexray-App/releases/latest/download/latest.json"
       ],
       "pubkey": "REPLACE_ME_TAURI_UPDATER_PUBKEY"
     }

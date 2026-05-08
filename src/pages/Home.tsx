@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { Link } from "react-router-dom";
 import { ArrowDown, ArrowUp, Power, RefreshCw } from "lucide-react";
@@ -38,8 +39,12 @@ export function Home() {
 
   const inflight = busy || status.state === "connecting";
   const isLive = status.state === "connected" || status.state === "connecting";
-  const connectLabel = inflight ? "Connecting…" : intl.formatMessage({ id: "home.connect" });
-  const disconnectLabel = busy ? "Disconnecting…" : intl.formatMessage({ id: "home.disconnect" });
+  const connectLabel = intl.formatMessage({
+    id: inflight ? "home.connecting" : "home.connect",
+  });
+  const disconnectLabel = intl.formatMessage({
+    id: busy ? "home.disconnecting" : "home.disconnect",
+  });
 
   return (
     <>
@@ -74,7 +79,7 @@ export function Home() {
                     }
                   }}
                   style={{ flex: 1, minWidth: 0 }}
-                  title="Switch active server (auto-reconnects if connected)"
+                  title={intl.formatMessage({ id: "home.profile.switch_aria" })}
                 >
                   {manualProfiles.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -83,12 +88,17 @@ export function Home() {
                   ))}
                   {!manualProfiles.some((p) => p.id === profile.id) && (
                     <option value="__pool__">
-                      {profile.name} (from pool)
+                      {intl.formatMessage(
+                        { id: "home.profile.from_pool" },
+                        { name: profile.name },
+                      )}
                     </option>
                   )}
                 </select>
                 <Link to="/servers">
-                  <small className="dim">manage</small>
+                  <small className="dim">
+                    <FormattedMessage id="home.profile.manage" />
+                  </small>
                 </Link>
               </div>
             ) : (
@@ -100,6 +110,7 @@ export function Home() {
               uiProfile={profile}
               backendProfileId={status.profileId}
               connectionState={status.state}
+              socksPort={status.socksPort}
             />
           </>
         ) : (
@@ -115,7 +126,9 @@ export function Home() {
             className="flash err"
             style={{ marginTop: "0.5rem", marginBottom: "0.5rem" }}
           >
-            <strong>xray reported:</strong>{" "}
+            <strong>
+              <FormattedMessage id="home.error.xray_reported" />
+            </strong>{" "}
             <span className="mono" style={{ wordBreak: "break-word" }}>
               {status.lastError}
             </span>
@@ -134,7 +147,10 @@ export function Home() {
             }}
           >
             <span style={{ flex: 1, wordBreak: "break-word" }}>
-              <strong>Connect failed:</strong> {actionError}
+              <strong>
+                <FormattedMessage id="home.error.connect_failed" />
+              </strong>{" "}
+              {actionError}
             </span>
             <button
               type="button"
@@ -146,7 +162,7 @@ export function Home() {
                 padding: "0 0.25rem",
                 cursor: "pointer",
               }}
-              aria-label="Dismiss"
+              aria-label={intl.formatMessage({ id: "common.dismiss" })}
             >
               ×
             </button>
@@ -183,40 +199,36 @@ export function Home() {
       </div>
 
       <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <strong>
-            <FormattedMessage id="home.uplink" />
-          </strong>
-          <span className="row" style={{ gap: "0.6rem" }}>
-            <span className="mono" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <ArrowUp size={13} strokeWidth={2.5} />
-              {formatRate(spark.up[spark.up.length - 1] ?? 0)}
-            </span>
-            <span className="mono dim">{formatBytes(stats.uplinkBytes)}</span>
-          </span>
-        </div>
-
         <div
-          className="row"
-          style={{ justifyContent: "space-between", marginTop: "0.5rem" }}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "1.5rem",
+          }}
         >
-          <strong>
-            <FormattedMessage id="home.downlink" />
-          </strong>
-          <span className="row" style={{ gap: "0.6rem" }}>
-            <span className="mono" style={{ color: "var(--green)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <ArrowDown size={13} strokeWidth={2.5} />
-              {formatRate(spark.down[spark.down.length - 1] ?? 0)}
-            </span>
-            <span className="mono dim">{formatBytes(stats.downlinkBytes)}</span>
-          </span>
+          <SpeedColumn
+            label={<FormattedMessage id="home.uplink" />}
+            icon={<ArrowUp size={13} strokeWidth={2.5} />}
+            rate={spark.up[spark.up.length - 1] ?? 0}
+            total={stats.uplinkBytes}
+            color="var(--accent)"
+          />
+          <SpeedColumn
+            label={<FormattedMessage id="home.downlink" />}
+            icon={<ArrowDown size={13} strokeWidth={2.5} />}
+            rate={spark.down[spark.down.length - 1] ?? 0}
+            total={stats.downlinkBytes}
+            color="var(--green)"
+          />
         </div>
 
         {!stats.available && isLive && (
-          <p className="dim" style={{ marginTop: "0.5rem" }}>
+          <p
+            className="dim"
+            style={{ margin: "1rem 0 0", textAlign: "center" }}
+          >
             <small>
-              Stats API not reachable yet — counters appear once xray finishes
-              starting.
+              <FormattedMessage id="home.stats.unavailable" />
             </small>
           </p>
         )}
@@ -238,6 +250,73 @@ function summarizeProfile(p: Profile): string {
   return `${p.kind} · ${endpoint}`;
 }
 
+/// One half of the Up/Down speed card. Shows a small uppercase label, a
+/// hero current-rate number, and the cumulative byte total below.
+function SpeedColumn({
+  label,
+  icon,
+  rate,
+  total,
+  color,
+}: {
+  label: ReactNode;
+  icon: ReactNode;
+  rate: number;
+  total: number;
+  color: string;
+}) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div
+        className="row"
+        style={{
+          alignItems: "center",
+          gap: 6,
+          color: "var(--fg-2)",
+        }}
+      >
+        <span style={{ display: "inline-flex", color }}>{icon}</span>
+        <span
+          style={{
+            textTransform: "uppercase",
+            fontSize: "0.7rem",
+            letterSpacing: "0.12em",
+            fontWeight: 600,
+          }}
+        >
+          {label}
+        </span>
+      </div>
+      <div
+        className="mono"
+        style={{
+          fontSize: "1.55rem",
+          fontWeight: 600,
+          color,
+          marginTop: "0.35rem",
+          lineHeight: 1.1,
+          letterSpacing: "-0.01em",
+          // Tabular-nums keeps the digit columns from jiggling as the
+          // value changes once per second.
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {formatRate(rate)}
+      </div>
+      <div
+        className="dim mono"
+        style={{
+          fontSize: "0.78rem",
+          marginTop: "0.45rem",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {formatBytes(total)} <FormattedMessage id="home.stats.total_suffix" />
+      </div>
+    </div>
+  );
+}
+
 /// Shows whether the running xray's outbound actually points at the
 /// currently-selected profile. The connection store exposes the backend's
 /// `profile_id` (set when xray was last spawned/restarted) — if that
@@ -246,23 +325,31 @@ function ActiveServerStatus({
   uiProfile,
   backendProfileId,
   connectionState,
+  socksPort,
 }: {
   uiProfile: Profile;
   backendProfileId: string | null;
   connectionState: string;
+  socksPort: number | null;
 }) {
   if (connectionState === "connecting") {
     return (
       <p className="dim mono" style={{ marginTop: "0.4rem", fontSize: "0.85em" }}>
         <span style={{ color: "var(--yellow)" }}>● </span>
-        Switching to {uiProfile.address}:{uiProfile.port}…
+        <FormattedMessage
+          id="home.profile.switching"
+          values={{ address: uiProfile.address, port: uiProfile.port }}
+        />
       </p>
     );
   }
   if (connectionState !== "connected") {
     return (
       <p className="dim mono" style={{ marginTop: "0.4rem", fontSize: "0.85em" }}>
-        Click Connect to route through {uiProfile.address}:{uiProfile.port}.
+        <FormattedMessage
+          id="home.profile.connect_to_route"
+          values={{ address: uiProfile.address, port: uiProfile.port }}
+        />
       </p>
     );
   }
@@ -276,9 +363,22 @@ function ActiveServerStatus({
         color: inSync ? "var(--green)" : "var(--yellow)",
       }}
     >
-      ● {inSync
-        ? `Live on ${uiProfile.address}:${uiProfile.port}`
-        : "Reconnecting — backend still on the previous server"}
+      ●{" "}
+      {inSync ? (
+        <FormattedMessage
+          id="home.profile.live_on"
+          values={{
+            address: uiProfile.address,
+            port: uiProfile.port,
+            // Loopback by design (DEVELOPMENT.md §12 rule 6 — the SOCKS
+            // listener never binds anything other than 127.0.0.1).
+            proxyHost: "127.0.0.1",
+            proxyPort: socksPort ?? "—",
+          }}
+        />
+      ) : (
+        <FormattedMessage id="home.profile.reconnecting" />
+      )}
     </p>
   );
 }
@@ -398,30 +498,36 @@ function EgressCheckCard({
         className="row"
         style={{ justifyContent: "space-between", alignItems: "baseline" }}
       >
-        <strong>Egress IP</strong>
+        <strong>
+          <FormattedMessage id="home.egress.heading" />
+        </strong>
         <button
           onClick={() => void runCheck()}
           disabled={!isLive || busy}
           style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
         >
           <RefreshCw size={13} strokeWidth={2.4} className={busy ? "spin" : undefined} />
-          {busy ? "Checking…" : "Refresh"}
+          <FormattedMessage
+            id={busy ? "home.egress.checking" : "home.egress.refresh"}
+          />
         </button>
       </div>
       <p className="dim" style={{ margin: "0.3rem 0 0.6rem" }}>
         <small>
-          What ifconfig.me sees through the proxy. If both servers share a
-          CDN front (e.g. Cloudflare), watch for the prefix change — that
-          confirms the switch reached the wire.
+          <FormattedMessage id="home.egress.help" />
         </small>
       </p>
       {!isLive ? (
         <p className="dim mono">
-          <small>(connect to probe)</small>
+          <small>
+            <FormattedMessage id="home.egress.placeholder_offline" />
+          </small>
         </p>
       ) : current === null ? (
         <p className="dim mono">
-          <small>{busy ? "checking…" : "—"}</small>
+          <small>
+            {busy ? <FormattedMessage id="home.egress.checking" /> : "—"}
+          </small>
         </p>
       ) : current.ok ? (
         <>
@@ -443,7 +549,12 @@ function EgressCheckCard({
           {history.length > 1 && (
             <details style={{ marginTop: "0.5rem" }}>
               <summary className="dim" style={{ cursor: "pointer" }}>
-                <small>Last {history.length} unique egresses</small>
+                <small>
+                  <FormattedMessage
+                    id="home.egress.last_n"
+                    values={{ n: history.length }}
+                  />
+                </small>
               </summary>
               <ul
                 className="mono"
@@ -467,7 +578,7 @@ function EgressCheckCard({
         </>
       ) : (
         <div className="mono" style={{ color: "var(--yellow)", wordBreak: "break-all" }}>
-          {current.error ?? "check failed"}
+          {current.error ?? <FormattedMessage id="home.egress.fail" />}
         </div>
       )}
     </div>

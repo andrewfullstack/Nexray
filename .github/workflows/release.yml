@@ -1,52 +1,84 @@
 name: Release
 
-# Tag-driven release. Tag a commit `v*.*.*` (e.g. `v1.0.0`) and the matrix
-# below will build, sign (if secrets are populated), and attach installers to
-# a GitHub Release. The first run of this workflow against a fresh repo will
-# fail loudly — you must populate the secrets listed in the comments below.
+# Tag-driven release. Tag a commit `v*.*.*` here in the source repo and
+# this workflow:
+#   1. Builds installers for all four platforms in parallel.
+#   2. Uploads each as a workflow artifact (not a release in THIS repo).
+#   3. Final `publish` job downloads all four and creates a draft
+#      release on the public sibling repo `andrewfullstack/Nexray-App`,
+#      with every installer attached.
 #
-# Required secrets (Repo → Settings → Secrets and variables → Actions):
+# Why split source vs. release repo:
+#   - This repo holds the dev history; Nexray-App stays clean — just
+#     binaries, README, and (eventually) a GitHub Pages download site.
+#   - End-users only see Nexray-App; they never browse the source.
 #
-#   APPLE_CERTIFICATE              base64 of your Developer ID .p12
-#   APPLE_CERTIFICATE_PASSWORD     password for the .p12
-#   APPLE_SIGNING_IDENTITY         e.g. "Developer ID Application: Your Name (TEAMID)"
-#   APPLE_ID                       Apple ID email
-#   APPLE_PASSWORD                 app-specific password (notarytool submit)
-#   APPLE_TEAM_ID                  10-char team identifier
+# ─── Required secret for cross-repo publish ─────────────────────────
 #
-#   WINDOWS_CERTIFICATE            base64 of your code-signing .pfx (or use
-#                                  Azure Trusted Signing — see workflow comments)
-#   WINDOWS_CERTIFICATE_PASSWORD   password for the .pfx
+#   RELEASE_PUBLISH_TOKEN
+#     Fine-grained Personal Access Token issued by the user that owns
+#     andrewfullstack/Nexray-App. Settings → Developer settings →
+#     Personal access tokens → Fine-grained → New.
+#       Resource owner:    andrewfullstack
+#       Repository access: only `Nexray-App`
+#       Permissions:       Contents = Read and write
+#                          Metadata  = Read (auto)
+#     Paste the token into THIS repo's
+#       Settings → Secrets and variables → Actions → New repository secret
+#     under the name `RELEASE_PUBLISH_TOKEN`.
 #
-#   TAURI_SIGNING_PRIVATE_KEY      `tauri signer generate` private half
-#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  password for the key
+# ─── Optional signing secrets (build job, same as before) ──────────
 #
-# After populating, push a tag: `git tag v1.0.0 && git push origin v1.0.0`.
+# macOS code-signing + notarisation:
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
+#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
+#
+# Windows code-signing:
+#   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD
+#
+# Auto-updater signing (only if `tauri.conf.json → updater.active = true`):
+#   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#
+# Missing signing secrets are tolerated — `tauri-action` skips the
+# matching step. Only RELEASE_PUBLISH_TOKEN is hard-required.
 
 on:
   push:
     tags: ["v*.*.*"]
   workflow_dispatch:
 
+# This workflow only READS this repo's contents (the publish step writes
+# to a different repo, using the PAT below — not the workflow's default
+# GITHUB_TOKEN).
 permissions:
-  contents: write
+  contents: read
+
+env:
+  PUBLISH_REPO: andrewfullstack/Nexray-App
 
 jobs:
-  release:
-    name: Release ${{ matrix.os }}
+  build:
+    name: Build ${{ matrix.os }} (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # Trimmed matrix: one installer per platform.
+        #   macOS  → .dmg only (Apple Silicon; Intel dropped)
+        #   Linux  → .deb only (AppImage / RPM dropped)
+        #   Windows → NSIS .exe only (MSI dropped)
+        # `bundles` is forwarded to `tauri build --bundles <type>` so
+        # tauri-action emits exactly one installer per matrix slot.
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-          - os: macos-14
-            target: x86_64-apple-darwin
+            bundles: dmg
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            bundles: deb
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            bundles: nsis
 
     steps:
       - uses: actions/checkout@v4
@@ -71,36 +103,222 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
 
+      # Stamp the tag's version into package.json, tauri.conf.json, and
+      # the workspace Cargo.toml so the bundler emits correctly-versioned
+      # filenames (`Nexray_1.2.3_aarch64.dmg`) without anyone having to
+      # bump source first. Tag-only — workflow_dispatch from a branch
+      # leaves the source-tree value alone (typically "0.0.0" for dev).
+      - name: Stamp version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: node scripts/stamp-version.mjs ${{ github.ref_name }}
+
       - run: pnpm install --frozen-lockfile
 
       - name: Fetch xray-core + tun2socks + geo data
         run: pnpm run fetch-core -- --target=${{ matrix.target }}
         env:
-          # `fetch-core.mjs` refuses to download until the SHA-256 entries in
-          # `scripts/fetch-core.mjs` are populated. Update those constants in
-          # a separate PR before tagging a release.
           NEXRAY_RELEASE_FETCH: "1"
 
+      # Build-only mode: NO `tagName` argument, so `tauri-action` skips
+      # its own release-creation step and just produces installer
+      # bundles in `src-tauri/target/<triple>/release/bundle/`. The
+      # cross-repo publish job below picks them up via workflow
+      # artifacts.
       - name: Build & bundle
         uses: tauri-apps/tauri-action@v0
         env:
-          # Tauri updater signing.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS code-signing + notarization.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows code-signing.
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Nexray ${{ github.ref_name }}"
-          releaseBody: "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)."
-          releaseDraft: true
-          prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      # Hand the installers off to the publish job. Each matrix slot
+      # uploads under its own artifact name so we don't clobber.
+      - name: Collect installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ./release-staging
+          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            echo "::error::expected bundle dir not found: $BUNDLE_DIR"
+            exit 1
+          fi
+          # One installer per platform: .dmg (macOS arm64), .deb (Linux
+          # x86_64), .exe (Windows NSIS x86_64). The `.sig` siblings
+          # are only emitted when the tauri-updater signing key is
+          # configured — left in the glob so they ride along when
+          # present, ignored otherwise.
+          find "$BUNDLE_DIR" -type f \( \
+              -name "*.dmg" -o \
+              -name "*.deb" -o \
+              -name "*.exe" -o \
+              -name "*.nsis.zip" -o \
+              -name "*.nsis.zip.sig" \
+            \) -exec cp -v {} ./release-staging/ \;
+          echo "--- staged ---"
+          ls -la ./release-staging
+
+      - name: Upload installers as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.target }}
+          path: ./release-staging
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to ${{ env.PUBLISH_REPO }}
+    needs: build
+    runs-on: ubuntu-22.04
+    # Only tag-driven runs become real releases. workflow_dispatch from
+    # a branch builds artifacts (useful for smoke-testing the pipeline)
+    # but skips publishing — there's no SemVer tag to attach the release to.
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Only need the working tree for the changelog excerpt below.
+          # No credentials helper is set, so any subsequent gh-cli call
+          # uses RELEASE_PUBLISH_TOKEN (set as `GH_TOKEN` env), which
+          # targets the publish repo, not this one.
+          persist-credentials: false
+
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: ./downloaded
+          # Match the names from the build job's upload step.
+          pattern: installers-*
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la ./downloaded
+
+      - name: Build release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo "Nexray ${{ github.ref_name }} — built from ${{ github.repository }}@${{ github.sha }}."
+            echo
+            echo "## Downloads"
+            echo
+            echo "| Platform | Architecture | File |"
+            echo "|----------|--------------|------|"
+            for f in ./downloaded/*; do
+              base="$(basename "$f")"
+              case "$base" in
+                *aarch64*.dmg)      echo "| macOS (Apple Silicon) | aarch64 | \`$base\` |" ;;
+                *amd64.deb)         echo "| Linux                 | x86_64  | \`$base\` |" ;;
+                *_x64-setup.exe)    echo "| Windows               | x86_64  | \`$base\` |" ;;
+                *) ;;
+              esac
+            done
+            echo
+            echo "Source for this release: <https://github.com/${{ github.repository }}/commit/${{ github.sha }}>."
+          } > ./release-notes.md
+          cat ./release-notes.md
+
+      - name: Create release on ${{ env.PUBLISH_REPO }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::RELEASE_PUBLISH_TOKEN secret is not configured. See workflow header for setup."
+            exit 1
+          fi
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ env.PUBLISH_REPO }}" \
+            --title "Nexray ${{ github.ref_name }}" \
+            --notes-file ./release-notes.md \
+            --draft \
+            ./downloaded/*
+
+      # ─── GitHub Pages deploy ─────────────────────────────────────
+      # Render `web/index.template.html` with this release's filenames,
+      # then force-push the result to the `gh-pages` branch of
+      # andrewfullstack/Nexray-App. Pages source must be configured ONCE
+      # on Nexray-App: Settings → Pages → Source: Deploy from a branch
+      # → `gh-pages` / `(root)` → Save. After that, every tag push
+      # auto-refreshes https://andrewfullstack.github.io/Nexray-App/.
+
+      - name: Resolve installer filenames
+        id: filenames
+        shell: bash
+        run: |
+          set -euo pipefail
+          pick() {
+            # Picks the first match for a glob pattern from ./downloaded
+            # and emits its basename. Empty string if no match — we
+            # tolerate that so a partial release still produces a
+            # page (with the corresponding card showing an empty link).
+            local match
+            match=$(find ./downloaded -maxdepth 1 -type f -name "$1" | sort | head -1 || true)
+            if [ -n "$match" ]; then basename "$match"; else echo ""; fi
+          }
+          {
+            echo "dmg_arm=$(pick 'Nexray_*_aarch64.dmg')"
+            echo "deb=$(pick 'nexray_*_amd64.deb')"
+            echo "exe=$(pick 'Nexray_*_x64-setup.exe')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Render Pages site
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+          PUBLISH_REPO: ${{ env.PUBLISH_REPO }}
+          BASE: https://github.com/${{ env.PUBLISH_REPO }}/releases/download/${{ github.ref_name }}
+          DMG_ARM: ${{ steps.filenames.outputs.dmg_arm }}
+          DEB: ${{ steps.filenames.outputs.deb }}
+          EXE: ${{ steps.filenames.outputs.exe }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./pages
+          # Whitelisted-variable substitution: only the names listed
+          # below are interpolated; any other `$` in the template is
+          # left intact.
+          envsubst '${VERSION} ${PUBLISH_REPO} ${BASE} ${DMG_ARM} ${DEB} ${EXE}' \
+            < web/index.template.html \
+            > ./pages/index.html
+          # Pages serves any folder Jekyll-style by default; .nojekyll
+          # disables that so the HTML is served verbatim (no risk of
+          # `_*` filenames being hidden, no Liquid interpolation).
+          touch ./pages/.nojekyll
+          echo "--- rendered ---"
+          ls -la ./pages
+          head -20 ./pages/index.html
+
+      - name: Deploy site to gh-pages of ${{ env.PUBLISH_REPO }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::RELEASE_PUBLISH_TOKEN missing — Pages deploy needs the same token."
+            exit 1
+          fi
+          # Single-commit history on the gh-pages branch — each release
+          # is the new state, no log to keep. Force-push is intentional
+          # and safe: Pages doesn't care about history, only the
+          # working tree of the branch tip.
+          cd ./pages
+          git init -q -b gh-pages
+          git config user.name  "andrewfullstack"
+          git config user.email "278670969+andrewfullstack@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Deploy ${{ github.ref_name }} (build ${{ github.sha }})"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${{ env.PUBLISH_REPO }}.git"
+          git push --force --quiet origin gh-pages
+          echo "::notice title=Pages deployed::https://${OWNER:-andrewfullstack}.github.io/$(basename ${{ env.PUBLISH_REPO }})/ — enable in Nexray-App → Settings → Pages → Source: gh-pages branch"

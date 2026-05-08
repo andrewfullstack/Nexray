@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AddSubscriptionRequest, Subscription } from "../lib/ipc";
 import { tauri } from "../lib/tauri";
+import { useProfileStore } from "./profile";
 
 interface SubscriptionsStore {
   subs: Subscription[];
@@ -41,6 +42,11 @@ export const useSubscriptionsStore = create<SubscriptionsStore>((set) => ({
 
   remove: async (id) => {
     await tauri.subscriptionDelete(id);
+    // Demote any servers the user imported from this subscription back
+    // into the ungrouped "manual" bucket so deleting an airport URL
+    // doesn't silently take their saved servers with it. Group settings
+    // (auto-switch toggle) for this group are dropped at the same time.
+    await useProfileStore.getState().untagGroup(id);
     const subs = await tauri.subscriptionsList();
     set({ subs });
   },
