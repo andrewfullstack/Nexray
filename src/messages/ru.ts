@@ -185,7 +185,7 @@ export const ru: Record<string, string> = {
   "addserver.heading.share_link": "Импорт из ссылки",
   "addserver.heading.json": "Импорт из JSON-конфига",
   "addserver.help.share_link":
-    "Вставьте ссылку vless://, чтобы автоматически заполнить форму. Другие схемы (vmess, ss, trojan, …) отвергаются.",
+    "Вставьте ссылку vless:// или trojan://, чтобы автоматически заполнить форму. Устаревшие схемы (vmess, ss, trojan-go, …) отвергаются.",
   "addserver.help.json":
     "Вставьте серверный JSON в стиле Shadowrocket. Проходят валидацию только VLESS+WebSocket+TLS (cdn-ws) и VLESS+REALITY; всё остальное отклоняется со структурированной причиной.",
   "addserver.import_button": "Импорт",

@@ -9,7 +9,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::skip_reason::SkipReason;
-use crate::types_gen::{Alpn, CdnWsProfile, Fingerprint, Profile, RealityProfile};
+use crate::types_gen::{Alpn, CdnWsProfile, Fingerprint, Profile, RealityProfile, TrojanProfile};
 
 /// Result of decoding a single share link.
 ///
@@ -47,14 +47,19 @@ pub fn decode_share_link(raw: &str) -> DecodeResult {
     if lower.starts_with("ss://") || lower.starts_with("ssr://") {
         return err(SkipReason::ShadowsocksLegacy, raw);
     }
-    if lower.starts_with("trojan://") || lower.starts_with("trojan-go://") {
-        return err(SkipReason::TrojanLegacy, raw);
+    // trojan-go is a separate, incompatible fork; still refused. Plain
+    // `trojan://` over TCP+TLS is parsed below.
+    if lower.starts_with("trojan-go://") {
+        return err(SkipReason::TrojanGoLegacy, raw);
     }
     if lower.starts_with("http://") || lower.starts_with("https://") {
         return err(SkipReason::HttpUnsupported, raw);
     }
     if lower.starts_with("socks://") || lower.starts_with("socks5://") {
         return err(SkipReason::SocksUnsupported, raw);
+    }
+    if lower.starts_with("trojan://") {
+        return decode_trojan(trimmed);
     }
     if !lower.starts_with("vless://") {
         return err(SkipReason::UnknownProtocol, raw);
@@ -184,6 +189,92 @@ fn parse_cdn_ws(
     }
 }
 
+fn decode_trojan(raw: &str) -> DecodeResult {
+    let Ok(url) = Url::parse(raw) else {
+        return err(SkipReason::Malformed, raw);
+    };
+
+    let password = decode_pct(url.username());
+    let address = url.host_str().unwrap_or("").to_string();
+    let Some(port) = url.port() else {
+        return err(SkipReason::Malformed, raw);
+    };
+    if password.is_empty() || address.is_empty() {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    let q: std::collections::HashMap<String, String> = url
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    let remark = url.fragment().map(decode_pct).filter(|s| !s.is_empty());
+
+    let network = q
+        .get("type")
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "tcp".into());
+    if network == "ws" {
+        return err(SkipReason::TrojanWs, raw);
+    }
+    if network != "tcp" {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    // Trojan defaults to TLS; refuse `security=none` outright.
+    let security = q
+        .get("security")
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "tls".into());
+    if security != "tls" {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    // DEVELOPMENT.md §4.1: never accept allowInsecure=1.
+    if let Some(v) = q.get("allowInsecure") {
+        let v = v.to_ascii_lowercase();
+        if v == "1" || v == "true" {
+            return err(SkipReason::Malformed, raw);
+        }
+    }
+
+    let sni = q
+        .get("sni")
+        .or_else(|| q.get("peer"))
+        .map(String::as_str)
+        .unwrap_or(address.as_str())
+        .to_string();
+    if sni.is_empty() {
+        return err(SkipReason::Malformed, raw);
+    }
+
+    let Some(fingerprint) = pick_fingerprint(q.get("fp").map(String::as_str)) else {
+        return err(SkipReason::Malformed, raw);
+    };
+    let alpn = parse_alpn(q.get("alpn").map(String::as_str));
+
+    let id = profile_id("trojan", &address, port, &password);
+    let name = remark
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| truncate_chars(s, 64))
+        .unwrap_or_else(|| format!("{address}:{port}"));
+
+    let profile = TrojanProfile {
+        id,
+        name,
+        remark: remark.map(|s| s.to_string()),
+        address,
+        port,
+        password,
+        sni,
+        alpn,
+        fingerprint,
+    };
+    DecodeResult::Ok {
+        profile: Profile::Trojan(profile),
+    }
+}
+
 fn parse_reality(
     raw: &str,
     uuid: &str,
@@ -298,14 +389,16 @@ fn parse_alpn(value: Option<&str>) -> Vec<Alpn> {
     }
 }
 
-/// Encode a Profile back to a `vless://...` URL. Pure, mirrors `encodeShareLink`.
+/// Encode a Profile back to a `vless://...` (or `trojan://...`) URL. Pure,
+/// mirrors `encodeShareLink`.
 pub fn encode_share_link(profile: &Profile) -> String {
-    let (uuid, address, port) = match profile {
+    let (credential, address, port) = match profile {
         Profile::CdnWs(p) => (&p.uuid, &p.address, p.port),
         Profile::Reality(p) => (&p.uuid, &p.address, p.port),
+        Profile::Trojan(p) => (&p.password, &p.address, p.port),
     };
 
-    let user = pct_encode(uuid);
+    let user = pct_encode(credential);
     let mut query = String::new();
     let mut push = |k: &str, v: &str| {
         if !query.is_empty() {
@@ -343,9 +436,23 @@ pub fn encode_share_link(profile: &Profile) -> String {
             }
             p.remark.as_deref()
         }
+        Profile::Trojan(p) => {
+            push("type", "tcp");
+            push("security", "tls");
+            push("sni", &p.sni);
+            push("fp", fingerprint_str(p.fingerprint));
+            let alpns: Vec<&str> = p.alpn.iter().map(|a| alpn_str(*a)).collect();
+            push("alpn", &alpns.join(","));
+            p.remark.as_deref()
+        }
     };
 
-    let mut out = format!("vless://{user}@{address}:{port}?{query}");
+    let scheme = if matches!(profile, Profile::Trojan(_)) {
+        "trojan"
+    } else {
+        "vless"
+    };
+    let mut out = format!("{scheme}://{user}@{address}:{port}?{query}");
     if let Some(r) = remark {
         if !r.is_empty() {
             out.push('#');

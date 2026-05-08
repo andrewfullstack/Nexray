@@ -92,6 +92,20 @@ const PROFILE_STRUCTS = {
       ["spiderX", "string"],
     ],
   },
+  TrojanProfile: {
+    kind: '"trojan"',
+    fields: [
+      ["id", "string"],
+      ["name", "string"],
+      ["remark", "?string"],
+      ["address", "string"],
+      ["port", "u16"],
+      ["password", "string"],
+      ["sni", "string"],
+      ["alpn", "Vec<Alpn>"],
+      ["fingerprint", "Fingerprint"],
+    ],
+  },
 };
 
 const IPC_STRUCTS = {
@@ -378,6 +392,8 @@ function renderRust() {
   lines.push("    CdnWs(CdnWsProfile),");
   lines.push('    #[serde(rename = "reality")]');
   lines.push("    Reality(RealityProfile),");
+  lines.push('    #[serde(rename = "trojan")]');
+  lines.push("    Trojan(TrojanProfile),");
   lines.push("}");
   lines.push("");
 

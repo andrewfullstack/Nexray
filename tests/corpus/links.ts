@@ -20,6 +20,12 @@ export const VALID_REALITY =
   "&flow=xtls-rprx-vision&encryption=none&spx=%2F" +
   "#Reality-VPS";
 
+export const VALID_TROJAN =
+  "trojan://secret-pwd@198.51.100.42:443" +
+  "?type=tcp&security=tls&sni=trojan.example.com&fp=chrome" +
+  "&alpn=h2%2Chttp%2F1.1" +
+  "#Trojan-VPS";
+
 // Legacy -- rejected at the protocol prefix --------------------------------
 
 export const VMESS_LINK =
@@ -29,7 +35,14 @@ export const SS_LINK = "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@1.2.3.4:8388#legacy";
 
 export const SSR_LINK = "ssr://aG9zdDoxMjM0NTpvcmlnaW46YWVzLTI1Ni1jZmI=";
 
-export const TROJAN_LINK = "trojan://password@1.2.3.4:443?security=tls#legacy";
+// trojan-go is a separate, incompatible fork; refused.
+export const TROJAN_GO_LINK = "trojan-go://password@1.2.3.4:443#legacy";
+
+// Plain trojan-WebSocket is rejected — Phase-7 scope is TCP+TLS only.
+export const TROJAN_WS_LINK =
+  "trojan://password@cdn.example.com:443" +
+  "?type=ws&security=tls&host=cdn.example.com&path=%2Ftrojan&sni=cdn.example.com" +
+  "#Trojan-WS";
 
 export const HTTP_LINK = "http://proxy.example.com:8080#nope";
 
@@ -77,7 +90,9 @@ export const MIXED_PLAIN_SUB = [
   VMESS_LINK,
   VALID_REALITY,
   SS_LINK,
-  TROJAN_LINK,
+  VALID_TROJAN,
+  TROJAN_GO_LINK,
+  TROJAN_WS_LINK,
   REALITY_GRPC,
   REALITY_WS,
   VLESS_TLS_DIRECT,

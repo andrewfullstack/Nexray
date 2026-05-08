@@ -10,8 +10,12 @@ pub enum SkipReason {
     VmessLegacy,
     #[serde(rename = "shadowsocks (legacy)")]
     ShadowsocksLegacy,
-    #[serde(rename = "trojan (legacy)")]
-    TrojanLegacy,
+    // Plain `trojan://` over TCP+TLS is supported and parses to a Profile.
+    // trojan-go is a separate, incompatible fork — still rejected.
+    #[serde(rename = "trojan-go (legacy)")]
+    TrojanGoLegacy,
+    #[serde(rename = "trojan+ws (unsupported)")]
+    TrojanWs,
     #[serde(rename = "http (unsupported as outbound)")]
     HttpUnsupported,
     #[serde(rename = "socks (unsupported as outbound)")]
@@ -41,7 +45,8 @@ impl SkipReason {
         match self {
             Self::VmessLegacy => "vmess (legacy)",
             Self::ShadowsocksLegacy => "shadowsocks (legacy)",
-            Self::TrojanLegacy => "trojan (legacy)",
+            Self::TrojanGoLegacy => "trojan-go (legacy)",
+            Self::TrojanWs => "trojan+ws (unsupported)",
             Self::HttpUnsupported => "http (unsupported as outbound)",
             Self::SocksUnsupported => "socks (unsupported as outbound)",
             Self::RealityWs => "reality+ws (invalid combination)",

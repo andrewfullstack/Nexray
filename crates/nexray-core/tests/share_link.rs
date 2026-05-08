@@ -51,12 +51,32 @@ fn accepts_clean_reality() {
 }
 
 #[test]
+fn accepts_clean_trojan() {
+    let Profile::Trojan(p) = expect_ok(VALID_TROJAN) else {
+        panic!("expected trojan variant");
+    };
+    assert_eq!(p.address, "198.51.100.42");
+    assert_eq!(p.port, 443);
+    assert_eq!(p.password, "secret-pwd");
+    assert_eq!(p.sni, "trojan.example.com");
+    assert_eq!(p.alpn.len(), 2);
+    assert_eq!(p.remark.as_deref(), Some("Trojan-VPS"));
+}
+
+#[test]
+fn rejects_trojan_with_allow_insecure() {
+    let raw = "trojan://pwd@1.2.3.4:443?type=tcp&sni=x.example.com&allowInsecure=1";
+    assert_eq!(expect_err(raw), SkipReason::Malformed);
+}
+
+#[test]
 fn rejects_legacy_and_invalid_combinations() {
     let cases: &[(&str, SkipReason)] = &[
         (VMESS_LINK, SkipReason::VmessLegacy),
         (SS_LINK, SkipReason::ShadowsocksLegacy),
         (SSR_LINK, SkipReason::ShadowsocksLegacy),
-        (TROJAN_LINK, SkipReason::TrojanLegacy),
+        (TROJAN_GO_LINK, SkipReason::TrojanGoLegacy),
+        (TROJAN_WS_LINK, SkipReason::TrojanWs),
         (HTTP_LINK, SkipReason::HttpUnsupported),
         (SOCKS_LINK, SkipReason::SocksUnsupported),
         (REALITY_WS, SkipReason::RealityWs),
@@ -90,5 +110,17 @@ fn cdn_ws_round_trips() {
 fn reality_round_trips() {
     let original = expect_ok(VALID_REALITY);
     let re = expect_ok(&encode_share_link(&original));
+    assert_eq!(format!("{:?}", original), format!("{:?}", re));
+}
+
+#[test]
+fn trojan_round_trips() {
+    let original = expect_ok(VALID_TROJAN);
+    let encoded = encode_share_link(&original);
+    assert!(
+        encoded.starts_with("trojan://"),
+        "expected trojan:// scheme, got {encoded}"
+    );
+    let re = expect_ok(&encoded);
     assert_eq!(format!("{:?}", original), format!("{:?}", re));
 }

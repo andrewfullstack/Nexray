@@ -212,6 +212,7 @@ pub fn profile_id(p: &Profile) -> &str {
     match p {
         Profile::CdnWs(p) => &p.id,
         Profile::Reality(p) => &p.id,
+        Profile::Trojan(p) => &p.id,
     }
 }
 
@@ -219,6 +220,7 @@ fn profile_endpoint(p: &Profile) -> (String, u16) {
     match p {
         Profile::CdnWs(p) => (p.address.clone(), p.port),
         Profile::Reality(p) => (p.address.clone(), p.port),
+        Profile::Trojan(p) => (p.address.clone(), p.port),
     }
 }
 

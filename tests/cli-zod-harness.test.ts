@@ -42,9 +42,13 @@ describe.skipIf(!cargoAvailable)("nexray-cli --json ↔ Zod schema", () => {
 
     const parsed = ClassifyResultSchema.parse(JSON.parse(stdout));
 
-    expect(parsed.accepted).toHaveLength(2);
-    expect(parsed.skipped).toHaveLength(8);
-    expect(parsed.accepted.map((p) => p.kind).sort()).toEqual(["cdn-ws", "reality"]);
+    expect(parsed.accepted).toHaveLength(3);
+    expect(parsed.skipped).toHaveLength(9);
+    expect(parsed.accepted.map((p) => p.kind).sort()).toEqual([
+      "cdn-ws",
+      "reality",
+      "trojan",
+    ]);
 
     const cdnWs = parsed.accepted.find((p) => p.kind === "cdn-ws");
     expect(cdnWs).toBeDefined();
@@ -61,6 +65,15 @@ describe.skipIf(!cargoAvailable)("nexray-cli --json ↔ Zod schema", () => {
       expect(reality.flow).toBe("xtls-rprx-vision");
       expect(reality.publicKey).toMatch(/^[A-Za-z0-9_-]{43}=?$/);
       expect(reality.shortId).toBe("abcd1234");
+    }
+
+    const trojan = parsed.accepted.find((p) => p.kind === "trojan");
+    expect(trojan).toBeDefined();
+    if (trojan?.kind === "trojan") {
+      expect(trojan.address).toBe("198.51.100.42");
+      expect(trojan.port).toBe(443);
+      expect(trojan.password).toBe("secret-pwd");
+      expect(trojan.sni).toBe("trojan.example.com");
     }
   }, 120_000);
 });

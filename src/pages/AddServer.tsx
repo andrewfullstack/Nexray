@@ -8,18 +8,20 @@ import {
   FINGERPRINTS,
   ProfileSchema,
   RealityProfileSchema,
+  TrojanProfileSchema,
   type Fingerprint,
   type Profile,
 } from "../lib/profile";
 import { useProfileStore } from "../stores/profile";
 
-type Kind = "cdn-ws" | "reality";
+type Kind = "cdn-ws" | "reality" | "trojan";
 
 interface FormState {
   kind: Kind;
   address: string;
   port: string;
-  uuid: string;
+  uuid: string;       // VLESS user UUID (cdn-ws + reality)
+  password: string;   // Trojan credential
   remarks: string;
   // cdn-ws
   host: string;
@@ -40,6 +42,7 @@ const initial: FormState = {
   address: "",
   port: "443",
   uuid: "",
+  password: "",
   remarks: "",
   host: "",
   path: "/?ed=2560",
@@ -129,9 +132,6 @@ export function AddServer() {
   return (
     <>
       <div className="card">
-        <Row label="Type">
-          <strong style={{ fontFamily: "var(--mono)" }}>VLESS</strong>
-        </Row>
         <Row label="Profile">
           <KindToggle value={form.kind} onChange={(v) => update("kind", v)} />
         </Row>
@@ -151,16 +151,28 @@ export function AddServer() {
           onChange={(v) => update("port", v)}
           inputMode="numeric"
         />
-        <FieldRow
-          label="UUID"
-          hint="Required"
-          value={form.uuid}
-          onChange={(v) => update("uuid", v)}
-          mono
-        />
-        <Row label="Encryption">
-          <span className="dim mono">none</span>
-        </Row>
+        {form.kind === "trojan" ? (
+          <FieldRow
+            label="Password"
+            hint="Required"
+            value={form.password}
+            onChange={(v) => update("password", v)}
+            mono
+          />
+        ) : (
+          <>
+            <FieldRow
+              label="UUID"
+              hint="Required"
+              value={form.uuid}
+              onChange={(v) => update("uuid", v)}
+              mono
+            />
+            <Row label="Encryption">
+              <span className="dim mono">none</span>
+            </Row>
+          </>
+        )}
 
         {form.kind === "cdn-ws" ? (
           <>
@@ -214,7 +226,7 @@ export function AddServer() {
               </div>
             </Row>
           </>
-        ) : (
+        ) : form.kind === "reality" ? (
           <>
             <Row label="Transport">
               <span className="mono">tcp</span>
@@ -253,6 +265,44 @@ export function AddServer() {
               onChange={(v) => update("spiderX", v)}
               mono
             />
+          </>
+        ) : (
+          <>
+            <Row label="Transport">
+              <span className="mono">tcp</span>
+            </Row>
+            <Row label="TLS">
+              <span className="mono">on</span>
+            </Row>
+            <FieldRow
+              label="SNI"
+              hint="TLS server name"
+              value={form.sni}
+              onChange={(v) => update("sni", v)}
+              mono
+            />
+            <Row label="ALPN">
+              <div className="row" style={{ gap: "1rem" }}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.alpnH2}
+                    onChange={(e) => update("alpnH2", e.target.checked)}
+                    style={{ width: "auto" }}
+                  />{" "}
+                  h2
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.alpnHttp11}
+                    onChange={(e) => update("alpnHttp11", e.target.checked)}
+                    style={{ width: "auto" }}
+                  />{" "}
+                  http/1.1
+                </label>
+              </div>
+            </Row>
           </>
         )}
 
@@ -319,7 +369,7 @@ export function AddServer() {
         <textarea
           value={importText}
           onChange={(e) => setImportText(e.target.value)}
-          placeholder="vless://uuid@host:port?type=…"
+          placeholder="vless://uuid@host:port?type=…  or  trojan://password@host:port?type=tcp"
           style={{ minHeight: "5rem" }}
         />
         {importError && (
@@ -444,6 +494,15 @@ function KindToggle({ value, onChange }: { value: Kind; onChange: (v: Kind) => v
         />
         reality
       </label>
+      <label>
+        <input
+          type="radio"
+          checked={value === "trojan"}
+          onChange={() => onChange("trojan")}
+          style={{ width: "auto", marginRight: "0.4rem" }}
+        />
+        trojan
+      </label>
     </div>
   );
 }
@@ -456,9 +515,14 @@ function buildProfile(f: FormState, preserveId: string | undefined): Profile | n
   const port = Number(f.port);
   if (!Number.isFinite(port)) return null;
 
+  // For id derivation: VLESS kinds key by uuid, trojan keys by password. The
+  // FNV hash needs *some* per-server distinguisher; the credential is the
+  // natural one since address+port may collide across users.
+  const credential = f.kind === "trojan" ? f.password : f.uuid;
+
   // In edit mode keep the original id even when fields change — otherwise
   // changing the address would create a new entry and orphan the old one.
-  const id = preserveId ?? profileId(f.kind, f.address, port, f.uuid);
+  const id = preserveId ?? profileId(f.kind, f.address, port, credential);
 
   if (f.kind === "cdn-ws") {
     const alpn = [
@@ -483,22 +547,44 @@ function buildProfile(f: FormState, preserveId: string | undefined): Profile | n
     return CdnWsProfileSchema.safeParse(candidate).data ?? null;
   }
 
+  if (f.kind === "reality") {
+    const candidate = {
+      kind: "reality" as const,
+      id,
+      name: f.remarks.trim() || `${f.address}:${port || ""}`,
+      ...(f.remarks.trim() ? { remark: f.remarks.trim() } : {}),
+      address: f.address.trim(),
+      port,
+      uuid: f.uuid.trim(),
+      sni: f.sni.trim(),
+      publicKey: f.publicKey.trim(),
+      shortId: f.shortId.trim().toLowerCase(),
+      fingerprint: f.fingerprint,
+      flow: "xtls-rprx-vision" as const,
+      spiderX: f.spiderX,
+    };
+    return RealityProfileSchema.safeParse(candidate).data ?? null;
+  }
+
+  // trojan
+  const alpn = [
+    ...(f.alpnH2 ? (["h2"] as const) : []),
+    ...(f.alpnHttp11 ? (["http/1.1"] as const) : []),
+  ];
+  if (alpn.length === 0) return null;
   const candidate = {
-    kind: "reality" as const,
+    kind: "trojan" as const,
     id,
     name: f.remarks.trim() || `${f.address}:${port || ""}`,
     ...(f.remarks.trim() ? { remark: f.remarks.trim() } : {}),
     address: f.address.trim(),
     port,
-    uuid: f.uuid.trim(),
+    password: f.password,
     sni: f.sni.trim(),
-    publicKey: f.publicKey.trim(),
-    shortId: f.shortId.trim().toLowerCase(),
+    alpn: alpn as ("h2" | "http/1.1")[],
     fingerprint: f.fingerprint,
-    flow: "xtls-rprx-vision" as const,
-    spiderX: f.spiderX,
   };
-  return RealityProfileSchema.safeParse(candidate).data ?? null;
+  return TrojanProfileSchema.safeParse(candidate).data ?? null;
 }
 
 function profileToForm(p: Profile): FormState {
@@ -507,7 +593,6 @@ function profileToForm(p: Profile): FormState {
     kind: p.kind,
     address: p.address,
     port: String(p.port),
-    uuid: p.uuid,
     remarks: p.remark ?? "",
     sni: p.sni,
     fingerprint: p.fingerprint,
@@ -515,17 +600,28 @@ function profileToForm(p: Profile): FormState {
   if (p.kind === "cdn-ws") {
     return {
       ...base,
+      uuid: p.uuid,
       host: p.host,
       path: p.path,
       alpnH2: p.alpn.includes("h2"),
       alpnHttp11: p.alpn.includes("http/1.1"),
     };
   }
+  if (p.kind === "reality") {
+    return {
+      ...base,
+      uuid: p.uuid,
+      publicKey: p.publicKey,
+      shortId: p.shortId,
+      spiderX: p.spiderX,
+    };
+  }
+  // trojan
   return {
     ...base,
-    publicKey: p.publicKey,
-    shortId: p.shortId,
-    spiderX: p.spiderX,
+    password: p.password,
+    alpnH2: p.alpn.includes("h2"),
+    alpnHttp11: p.alpn.includes("http/1.1"),
   };
 }
 

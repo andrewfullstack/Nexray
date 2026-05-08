@@ -17,10 +17,20 @@ pub const VALID_REALITY: &str = "vless://550e8400-e29b-41d4-a716-446655440001@19
 &flow=xtls-rprx-vision&encryption=none&spx=%2F\
 #Reality-VPS";
 
+pub const VALID_TROJAN: &str = "trojan://secret-pwd@198.51.100.42:443\
+?type=tcp&security=tls&sni=trojan.example.com&fp=chrome\
+&alpn=h2%2Chttp%2F1.1\
+#Trojan-VPS";
+
 pub const VMESS_LINK: &str = "vmess://eyJ2IjoiMiIsInBzIjoidm0iLCJhZGQiOiJleGFtcGxlLmNvbSJ9";
 pub const SS_LINK: &str = "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@1.2.3.4:8388#legacy";
 pub const SSR_LINK: &str = "ssr://aG9zdDoxMjM0NTpvcmlnaW46YWVzLTI1Ni1jZmI=";
-pub const TROJAN_LINK: &str = "trojan://password@1.2.3.4:443?security=tls#legacy";
+// trojan-go is a separate, incompatible fork; refused.
+pub const TROJAN_GO_LINK: &str = "trojan-go://password@1.2.3.4:443#legacy";
+// Plain trojan-WebSocket is rejected — Phase-7 scope is TCP+TLS only.
+pub const TROJAN_WS_LINK: &str = "trojan://password@cdn.example.com:443\
+?type=ws&security=tls&host=cdn.example.com&path=%2Ftrojan&sni=cdn.example.com\
+#Trojan-WS";
 pub const HTTP_LINK: &str = "http://proxy.example.com:8080#nope";
 pub const SOCKS_LINK: &str = "socks://1.2.3.4:1080#nope";
 
@@ -58,7 +68,9 @@ pub fn mixed_plain_sub() -> String {
         VMESS_LINK,
         VALID_REALITY,
         SS_LINK,
-        TROJAN_LINK,
+        VALID_TROJAN,
+        TROJAN_GO_LINK,
+        TROJAN_WS_LINK,
         REALITY_GRPC,
         REALITY_WS,
         VLESS_TLS_DIRECT,

@@ -177,7 +177,7 @@ export const zhTW: Record<string, string> = {
   "addserver.heading.share_link": "從分享連結匯入",
   "addserver.heading.json": "從 JSON 設定匯入",
   "addserver.help.share_link":
-    "貼上 vless:// 連結以自動填入表單。其他通訊協定(vmess、ss、trojan 等)將被拒絕。",
+    "貼上 vless:// 或 trojan:// 連結以自動填入表單。過時通訊協定(vmess、ss、trojan-go 等)將被拒絕。",
   "addserver.help.json":
     "貼上 Shadowrocket 風格的伺服器 JSON。僅 VLESS+WebSocket+TLS (cdn-ws) 和 VLESS+REALITY 通過驗證,其他會被結構化拒絕。",
   "addserver.import_button": "匯入",

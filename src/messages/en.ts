@@ -189,7 +189,7 @@ export const en: Record<string, string> = {
   "addserver.heading.share_link": "Import from share link",
   "addserver.heading.json": "Import from JSON config",
   "addserver.help.share_link":
-    "Paste a vless:// link to autofill the form. Other schemes (vmess, ss, trojan, ...) are rejected.",
+    "Paste a vless:// or trojan:// link to autofill the form. Legacy schemes (vmess, ss, trojan-go, ...) are rejected.",
   "addserver.help.json":
     "Paste a Shadowrocket-style server JSON. Only VLESS+WebSocket+TLS (cdn-ws) and VLESS+REALITY survive validation; anything else is rejected with a structured reason.",
   "addserver.import_button": "Import",

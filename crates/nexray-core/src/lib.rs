@@ -23,7 +23,7 @@ pub use types_gen::{
     ConnectionState, ConnectionStatus, CustomRule, DnsConfig, Fingerprint, Profile, RealityProfile,
     RoutingDestination, RoutingMatcherType, RoutingPreset, RoutingSettings, SetRoutingRequest,
     SetSettingsRequest, Subscription, SubscriptionIdRequest, SystemProxyStatus, TrafficStats,
-    TunCapabilities, TunState, TunStatus,
+    TrojanProfile, TunCapabilities, TunState, TunStatus,
 };
 
 /// Whitelist of uTLS fingerprints accepted by the parser. Mirrors

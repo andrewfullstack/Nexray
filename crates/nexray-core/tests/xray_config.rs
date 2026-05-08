@@ -3,7 +3,7 @@
 
 mod fixtures;
 
-use fixtures::{VALID_CDN_WS, VALID_REALITY};
+use fixtures::{VALID_CDN_WS, VALID_REALITY, VALID_TROJAN};
 use nexray_core::xray_config::{
     default_routing_settings, materialize, MaterializeError, XrayConfigOptions,
 };
@@ -25,6 +25,10 @@ fn cdn_ws_config(opts: XrayConfigOptions) -> serde_json::Value {
 
 fn reality_config(opts: XrayConfigOptions) -> serde_json::Value {
     materialize(&parse(VALID_REALITY), &opts).expect("materialize")
+}
+
+fn trojan_config(opts: XrayConfigOptions) -> serde_json::Value {
+    materialize(&parse(VALID_TROJAN), &opts).expect("materialize")
 }
 
 #[test]
@@ -399,6 +403,51 @@ fn dns_overrides_propagate_to_config() {
     assert!(dns.contains("tls://9.9.9.9"));
     assert!(!dns.contains("https://1.1.1.1"));
     assert!(!dns.contains("223.5.5.5"));
+}
+
+#[test]
+fn trojan_outbound_matches_xray_shape() {
+    let cfg = trojan_config(XrayConfigOptions::default());
+    let outbound = &cfg["outbounds"][0];
+    assert_eq!(outbound["protocol"], "trojan");
+    assert_eq!(outbound["tag"], "proxy");
+    let server = &outbound["settings"]["servers"][0];
+    assert_eq!(server["address"], "198.51.100.42");
+    assert_eq!(server["port"], 443);
+    assert_eq!(server["password"], "secret-pwd");
+    assert_eq!(outbound["streamSettings"]["network"], "tcp");
+    assert_eq!(outbound["streamSettings"]["security"], "tls");
+    assert_eq!(
+        outbound["streamSettings"]["tlsSettings"]["serverName"],
+        "trojan.example.com"
+    );
+    assert_eq!(
+        outbound["streamSettings"]["tlsSettings"]["fingerprint"],
+        "chrome"
+    );
+    // §12 rule: never trust allowInsecure from inputs; materializer always emits false.
+    assert_eq!(
+        outbound["streamSettings"]["tlsSettings"]["allowInsecure"],
+        false
+    );
+}
+
+#[test]
+fn rejects_empty_trojan_password() {
+    let mut trojan = match parse(VALID_TROJAN) {
+        Profile::Trojan(p) => p,
+        _ => panic!("expected trojan"),
+    };
+    trojan.password = String::new();
+    let err = materialize(&Profile::Trojan(trojan), &XrayConfigOptions::default())
+        .expect_err("should reject empty password");
+    assert!(matches!(
+        err,
+        MaterializeError::InvalidField {
+            kind: "trojan",
+            field: "password"
+        }
+    ));
 }
 
 #[test]

@@ -22,9 +22,11 @@ fn classify_mixed_file_prints_table_and_summary() {
         .arg(fixture("mixed.txt"))
         .assert()
         .success()
-        .stdout(predicate::str::contains("2 servers accepted"))
-        .stdout(predicate::str::contains("8 servers skipped:"))
+        .stdout(predicate::str::contains("3 servers accepted"))
+        .stdout(predicate::str::contains("9 servers skipped:"))
         .stdout(predicate::str::contains("vmess (legacy)"))
+        .stdout(predicate::str::contains("trojan-go (legacy)"))
+        .stdout(predicate::str::contains("trojan+ws (unsupported)"))
         .stdout(predicate::str::contains(
             "reality+grpc (invalid combination)",
         ))
@@ -48,8 +50,8 @@ fn classify_json_emits_machine_readable_output() {
 
     let s = String::from_utf8(out).expect("utf-8");
     let v: serde_json::Value = serde_json::from_str(&s).expect("valid JSON");
-    assert_eq!(v["accepted"].as_array().expect("array").len(), 2);
-    assert_eq!(v["skipped"].as_array().expect("array").len(), 8);
+    assert_eq!(v["accepted"].as_array().expect("array").len(), 3);
+    assert_eq!(v["skipped"].as_array().expect("array").len(), 9);
 
     let kinds: std::collections::BTreeSet<String> = v["accepted"]
         .as_array()
@@ -59,6 +61,7 @@ fn classify_json_emits_machine_readable_output() {
         .collect();
     assert!(kinds.contains("cdn-ws"));
     assert!(kinds.contains("reality"));
+    assert!(kinds.contains("trojan"));
 }
 
 #[test]

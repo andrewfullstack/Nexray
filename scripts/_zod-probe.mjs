@@ -7,6 +7,7 @@
 import {
   CdnWsProfileSchema,
   RealityProfileSchema,
+  TrojanProfileSchema,
 } from "../src/lib/profile.ts";
 import {
   ConnectionStatusSchema,
@@ -37,6 +38,7 @@ function describe(schema) {
 const out = {
   CdnWsProfile: describe(CdnWsProfileSchema),
   RealityProfile: describe(RealityProfileSchema),
+  TrojanProfile: describe(TrojanProfileSchema),
   ConnectionStatus: describe(ConnectionStatusSchema),
   TrafficStats: describe(TrafficStatsSchema),
   ConnectRequest: describe(ConnectRequestSchema),

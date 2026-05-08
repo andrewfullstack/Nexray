@@ -174,7 +174,7 @@ export const zhCN: Record<string, string> = {
   "addserver.heading.share_link": "从分享链接导入",
   "addserver.heading.json": "从 JSON 配置导入",
   "addserver.help.share_link":
-    "粘贴 vless:// 链接以自动填充表单。其他协议(vmess、ss、trojan 等)将被拒绝。",
+    "粘贴 vless:// 或 trojan:// 链接以自动填充表单。过时协议(vmess、ss、trojan-go 等)将被拒绝。",
   "addserver.help.json":
     "粘贴 Shadowrocket 风格的服务器 JSON。仅 VLESS+WebSocket+TLS (cdn-ws) 和 VLESS+REALITY 通过校验,其他将被结构化拒绝。",
   "addserver.import_button": "导入",

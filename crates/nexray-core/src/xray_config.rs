@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::types_gen::{
     Alpn, CdnWsProfile, CustomRule, DnsConfig, Fingerprint, Profile, RealityProfile,
-    RoutingDestination, RoutingMatcherType, RoutingPreset, RoutingSettings,
+    RoutingDestination, RoutingMatcherType, RoutingPreset, RoutingSettings, TrojanProfile,
 };
 
 /// Knobs for the materialized config. None of these affect security
@@ -85,6 +85,7 @@ pub fn materialize(profile: &Profile, opts: &XrayConfigOptions) -> Result<Value,
     let outbound = match profile {
         Profile::CdnWs(p) => cdn_ws_outbound(p),
         Profile::Reality(p) => reality_outbound(p),
+        Profile::Trojan(p) => trojan_outbound(p),
     };
 
     let mut inbounds = vec![json!({
@@ -226,6 +227,31 @@ fn reality_outbound(p: &RealityProfile) -> Value {
                 "publicKey": p.public_key,
                 "shortId": p.short_id,
                 "spiderX": p.spider_x
+            }
+        }
+    })
+}
+
+fn trojan_outbound(p: &TrojanProfile) -> Value {
+    let alpn: Vec<&str> = p.alpn.iter().map(alpn_str).collect();
+    json!({
+        "tag": "proxy",
+        "protocol": "trojan",
+        "settings": {
+            "servers": [{
+                "address": p.address,
+                "port": p.port,
+                "password": p.password
+            }]
+        },
+        "streamSettings": {
+            "network": "tcp",
+            "security": "tls",
+            "tlsSettings": {
+                "serverName": p.sni,
+                "alpn": alpn,
+                "fingerprint": fingerprint_str(p.fingerprint),
+                "allowInsecure": false
             }
         }
     })
@@ -412,6 +438,12 @@ fn validate(profile: &Profile) -> Result<(), MaterializeError> {
             check("reality", "sni", !p.sni.is_empty())?;
             check("reality", "publicKey", !p.public_key.is_empty())?;
             check("reality", "flow", p.flow == "xtls-rprx-vision")?;
+        }
+        Profile::Trojan(p) => {
+            check("trojan", "address", !p.address.is_empty())?;
+            check("trojan", "password", !p.password.is_empty())?;
+            check("trojan", "sni", !p.sni.is_empty())?;
+            check("trojan", "alpn", !p.alpn.is_empty())?;
         }
     }
     Ok(())

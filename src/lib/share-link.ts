@@ -2,11 +2,13 @@ import {
   CdnWsProfileSchema,
   FINGERPRINTS,
   RealityProfileSchema,
+  TrojanProfileSchema,
   type CdnWsProfile,
   type Fingerprint,
   type Profile,
   type RealityProfile,
   type SkipReason,
+  type TrojanProfile,
 } from "./profile";
 
 // ----------------------------------------------------------------------------
@@ -25,9 +27,10 @@ export type DecodeResult =
  * Decode a single share-link. Pure: never performs IO. Always returns a
  * structured result — never throws on malformed input.
  *
- * Supports only modern VLESS shapes:
+ * Supports the modern VLESS shapes plus Trojan over TCP+TLS:
  *   - vless://<uuid>@<host>:<port>?type=ws&security=tls&...   -> cdn-ws
  *   - vless://<uuid>@<host>:<port>?type=tcp&security=reality&... -> reality
+ *   - trojan://<password>@<host>:<port>?type=tcp&...           -> trojan
  *
  * Every other prefix or combination produces { ok: false, reason }.
  */
@@ -39,14 +42,19 @@ export function decodeShareLink(raw: string): DecodeResult {
   if (lower.startsWith("vmess://")) return { ok: false, reason: "vmess (legacy)", raw };
   if (lower.startsWith("ss://")) return { ok: false, reason: "shadowsocks (legacy)", raw };
   if (lower.startsWith("ssr://")) return { ok: false, reason: "shadowsocks (legacy)", raw };
-  if (lower.startsWith("trojan://") || lower.startsWith("trojan-go://")) {
-    return { ok: false, reason: "trojan (legacy)", raw };
+  // trojan-go is a separate, incompatible fork; we still refuse it. Plain
+  // trojan:// is parsed below.
+  if (lower.startsWith("trojan-go://")) {
+    return { ok: false, reason: "trojan-go (legacy)", raw };
   }
   if (lower.startsWith("http://") || lower.startsWith("https://")) {
     return { ok: false, reason: "http (unsupported as outbound)", raw };
   }
   if (lower.startsWith("socks://") || lower.startsWith("socks5://")) {
     return { ok: false, reason: "socks (unsupported as outbound)", raw };
+  }
+  if (lower.startsWith("trojan://")) {
+    return decodeTrojan(trimmed);
   }
   if (!lower.startsWith("vless://")) {
     return { ok: false, reason: "unknown protocol", raw };
@@ -106,11 +114,13 @@ export function decodeShareLink(raw: string): DecodeResult {
 }
 
 /**
- * Encode a Profile back to a `vless://...` share link. Round-trip for
- * normalization and copy-to-clipboard. Pure.
+ * Encode a Profile back to a `vless://...` (or `trojan://...`) share link.
+ * Round-trip for normalization and copy-to-clipboard. Pure.
  */
 export function encodeShareLink(profile: Profile): string {
-  const userInfo = encodeURIComponent(profile.uuid);
+  const credential =
+    profile.kind === "trojan" ? profile.password : profile.uuid;
+  const userInfo = encodeURIComponent(credential);
   const host = profile.address;
   const port = profile.port;
   const params = new URLSearchParams();
@@ -124,7 +134,7 @@ export function encodeShareLink(profile: Profile): string {
     params.set("sni", profile.sni);
     params.set("fp", profile.fingerprint);
     params.set("alpn", profile.alpn.join(","));
-  } else {
+  } else if (profile.kind === "reality") {
     params.set("type", "tcp");
     params.set("security", "reality");
     params.set("encryption", "none");
@@ -134,12 +144,20 @@ export function encodeShareLink(profile: Profile): string {
     params.set("sid", profile.shortId);
     params.set("fp", profile.fingerprint);
     if (profile.spiderX !== "") params.set("spx", profile.spiderX);
+  } else {
+    // trojan — userinfo is the password (raw, percent-encoded).
+    params.set("type", "tcp");
+    params.set("security", "tls");
+    params.set("sni", profile.sni);
+    params.set("fp", profile.fingerprint);
+    params.set("alpn", profile.alpn.join(","));
   }
 
   const fragment = profile.remark
     ? `#${encodeURIComponent(profile.remark)}`
     : "";
-  return `vless://${userInfo}@${host}:${port}?${params.toString()}${fragment}`;
+  const scheme = profile.kind === "trojan" ? "trojan" : "vless";
+  return `${scheme}://${userInfo}@${host}:${port}?${params.toString()}${fragment}`;
 }
 
 // ----------------------------------------------------------------------------
@@ -185,6 +203,70 @@ function parseCdnWs(input: ParseInput): DecodeResult {
   };
 
   const parsed = CdnWsProfileSchema.safeParse(candidate);
+  if (!parsed.success) return { ok: false, reason: "malformed", raw };
+  return { ok: true, profile: parsed.data };
+}
+
+function decodeTrojan(raw: string): DecodeResult {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, reason: "malformed", raw };
+  }
+
+  const password = decodeURIComponent(url.username);
+  const address = url.hostname;
+  const port = url.port ? Number(url.port) : Number.NaN;
+  const q = url.searchParams;
+  const remark = url.hash ? decodeURIComponent(url.hash.slice(1)) : undefined;
+
+  if (!password || !address || !Number.isFinite(port)) {
+    return { ok: false, reason: "malformed", raw };
+  }
+
+  // Phase-7 scope: TCP+TLS only. Reject ws / grpc / xhttp etc. with a
+  // dedicated reason for the most common case (CDN-fronted trojan-WS) so
+  // users see a clear "switch to TCP" message.
+  const network = (q.get("type") ?? "tcp").toLowerCase();
+  if (network === "ws") return { ok: false, reason: "trojan+ws (unsupported)", raw };
+  if (network !== "tcp") return { ok: false, reason: "malformed", raw };
+
+  // xray-core's trojan outbound is TLS-only. `security=tls` is the default
+  // when omitted; `security=none` would be a misconfiguration we refuse.
+  const security = (q.get("security") ?? "tls").toLowerCase();
+  if (security !== "tls") return { ok: false, reason: "malformed", raw };
+
+  // allowInsecure=1 means "accept any cert" — DEVELOPMENT.md §4.1 forbids it.
+  // We never set the flag in our materialized config, so refuse to import a
+  // share link that asked for it.
+  const allowInsecure = (q.get("allowInsecure") ?? "0").toLowerCase();
+  if (allowInsecure === "1" || allowInsecure === "true") {
+    return { ok: false, reason: "malformed", raw };
+  }
+
+  const sni = q.get("sni") ?? q.get("peer") ?? address;
+  if (!sni) return { ok: false, reason: "malformed", raw };
+
+  const fingerprint = pickFingerprint(q.get("fp"));
+  if (fingerprint === null) return { ok: false, reason: "malformed", raw };
+
+  const alpn = parseAlpn(q.get("alpn"));
+
+  const candidate: TrojanProfile = {
+    kind: "trojan",
+    id: profileId("trojan", address, port, password),
+    name: remark && remark.length > 0 ? remark.slice(0, 64) : `${address}:${port}`,
+    ...(remark !== undefined && remark.length > 0 ? { remark } : {}),
+    address,
+    port,
+    password,
+    sni,
+    alpn,
+    fingerprint,
+  };
+
+  const parsed = TrojanProfileSchema.safeParse(candidate);
   if (!parsed.success) return { ok: false, reason: "malformed", raw };
   return { ok: true, profile: parsed.data };
 }

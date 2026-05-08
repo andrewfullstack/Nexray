@@ -169,6 +169,13 @@ fn profile_row(profile: &Profile) -> Row {
             sni: p.sni.clone(),
             fingerprint: fingerprint_str(p.fingerprint),
         },
+        Profile::Trojan(p) => Row {
+            kind: "trojan",
+            name: truncate(&p.name, 26),
+            endpoint: format!("{}:{}", p.address, p.port),
+            sni: p.sni.clone(),
+            fingerprint: fingerprint_str(p.fingerprint),
+        },
     }
 }
 
