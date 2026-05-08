@@ -1137,6 +1137,32 @@ pub fn build_launcher_script_linux(p: LauncherPaths<'_>) -> String {
            fi\n\
          done\n\
          ip link set \"$IFACE\" down >> \"$LOG\" 2>&1 || true\n\
+         \n\
+         # Defensive: confirm the original default route is back. We\n\
+         # never explicitly removed it, but on systems running\n\
+         # NetworkManager it can disappear when a higher-specificity\n\
+         # 0.0.0.0/1 route appears on a freshly-up interface — NM\n\
+         # interprets that as the user changing the default route and\n\
+         # withdraws its own. When our split-default goes away on\n\
+         # teardown, NM does NOT automatically re-add it; the user is\n\
+         # left with no default route until the next DHCP renewal or\n\
+         # connectivity check, which manifests as \"internet broken\n\
+         # after Stop TUN\". Compare against the snapshot we captured\n\
+         # at start-up and restore if missing.\n\
+         if [ -n \"$LOCAL_GW\" ] && [ -n \"$LOCAL_IF\" ]; then\n\
+           if [ -z \"$(ip -4 route show default 2>/dev/null)\" ]; then\n\
+             ip route add default via \"$LOCAL_GW\" dev \"$LOCAL_IF\" >> \"$LOG\" 2>&1 \\\n\
+               && echo \"restored IPv4 default: via $LOCAL_GW dev $LOCAL_IF\" >> \"$LOG\" \\\n\
+               || echo \"WARN: failed to restore IPv4 default\" >> \"$LOG\"\n\
+           fi\n\
+         fi\n\
+         if [ -n \"$LOCAL_GW6\" ] && [ -n \"$LOCAL_IF6\" ]; then\n\
+           if [ -z \"$(ip -6 route show default 2>/dev/null)\" ]; then\n\
+             ip -6 route add default via \"$LOCAL_GW6\" dev \"$LOCAL_IF6\" >> \"$LOG\" 2>&1 \\\n\
+               && echo \"restored IPv6 default: via $LOCAL_GW6 dev $LOCAL_IF6\" >> \"$LOG\" \\\n\
+               || echo \"WARN: failed to restore IPv6 default\" >> \"$LOG\"\n\
+           fi\n\
+         fi\n\
          echo \"routing torn down\" >> \"$LOG\"\n\
          \n\
          rm -f \"$PIDFILE\"\n\
