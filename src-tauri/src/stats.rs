@@ -30,20 +30,25 @@ impl StatsClient {
     /// path, RPC error, parse error) so polling never throws.
     pub async fn fetch(xray_bin: &Path, stats_port: u16) -> TrafficStats {
         let server = format!("127.0.0.1:{stats_port}");
-        let exec = tokio::process::Command::new(xray_bin)
-            .args([
-                "api",
-                "statsquery",
-                "--server",
-                &server,
-                "-pattern",
-                "outbound>>>proxy>>>traffic",
-            ])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .output();
+        let mut cmd = tokio::process::Command::new(xray_bin);
+        cmd.args([
+            "api",
+            "statsquery",
+            "--server",
+            &server,
+            "-pattern",
+            "outbound>>>proxy>>>traffic",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+        // Suppress the per-poll console window on Windows. Without this
+        // flag, every 1Hz stats poll flashes a cmd.exe-style window —
+        // user-visible flicker for the entire connected session.
+        #[cfg(windows)]
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        let exec = cmd.output();
         // Cap at 750ms — the call usually returns in <50ms; if xray is
         // unhealthy we'd rather show stale stats than wedge the poller.
         let output = match tokio::time::timeout(Duration::from_millis(750), exec).await {

@@ -734,6 +734,14 @@ fn spawn_via_runas(
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
+    // Suppress the outer (unprivileged) powershell's console window —
+    // the elevated child already inherits -WindowStyle Hidden via the
+    // -ArgumentList we forwarded to it. Without this flag the parent
+    // pops a visible terminal that flickers each TUN start/stop.
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     let child = cmd.spawn()?;
     Ok(SpawnedLauncher::Privileged {
         child,
@@ -1251,12 +1259,26 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
          \"LOCAL_GW=$LOCAL_GW IDX=$LOCAL_IDX  LOCAL_GW6=$LOCAL_GW6 IDX6=$LOCAL_IDX6\" | Add-Content $LOG\n\
          '--- tun2socks output below ---' | Add-Content $LOG\n\
          \n\
-         # Spawn tun2socks. Start-Process -PassThru returns the child\n\
-         # process so we can capture its PID and wait on it later.\n\
+         # Spawn tun2socks. Start-Process refuses to redirect both stdout\n\
+         # and stderr to the same file — \"The process cannot access the\n\
+         # file because it is being used by another process\" — so we\n\
+         # write to two separate per-stream files and merge them into\n\
+         # the main launcher log at end-of-session for post-mortem\n\
+         # inspection. The supervisor's tail_log() reads $LOG live and\n\
+         # picks up our diagnostic prints; the merged tun2socks output\n\
+         # lands at teardown for failure-investigation purposes.\n\
+         $STDOUT_LOG = \"$LOG.tun2socks.stdout\"\n\
+         $STDERR_LOG = \"$LOG.tun2socks.stderr\"\n\
          $proc = Start-Process -FilePath $BIN \\\n\
            -ArgumentList @('-device', $IFACE, '-proxy', $PROXY, '-loglevel', 'warn') \\\n\
-           -RedirectStandardOutput $LOG -RedirectStandardError $LOG \\\n\
+           -RedirectStandardOutput $STDOUT_LOG -RedirectStandardError $STDERR_LOG \\\n\
            -WindowStyle Hidden -PassThru\n\
+         if (-not $proc) {{\n\
+           'ERROR: Start-Process for tun2socks returned null — aborting' | Add-Content $LOG\n\
+           Remove-Item -Force $PIDFILE -ErrorAction SilentlyContinue\n\
+           Remove-Item -Force $IFACE_FILE -ErrorAction SilentlyContinue\n\
+           exit 1\n\
+         }}\n\
          $TUN_PID = $proc.Id\n\
          \"$TUN_PID\" | Out-File -FilePath $PIDFILE -Encoding ASCII\n\
          \"tun2socks spawned with pid=$TUN_PID\" | Add-Content $LOG\n\
@@ -1341,6 +1363,13 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
          }}\n\
          Wait-Process -Id $TUN_PID -ErrorAction SilentlyContinue\n\
          'tun2socks exited' | Add-Content $LOG\n\
+         \n\
+         # Merge per-stream logs into the main launcher log.\n\
+         '=== tun2socks stdout ===' | Add-Content $LOG\n\
+         if (Test-Path $STDOUT_LOG) {{ Get-Content $STDOUT_LOG -ErrorAction SilentlyContinue | Add-Content $LOG }}\n\
+         '=== tun2socks stderr ===' | Add-Content $LOG\n\
+         if (Test-Path $STDERR_LOG) {{ Get-Content $STDERR_LOG -ErrorAction SilentlyContinue | Add-Content $LOG }}\n\
+         Remove-Item -Force $STDOUT_LOG, $STDERR_LOG -ErrorAction SilentlyContinue\n\
          \n\
          # Tear down everything we installed. Errors swallowed because\n\
          # the Wintun adapter typically vanishes with tun2socks, taking\n\

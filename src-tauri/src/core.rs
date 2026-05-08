@@ -151,6 +151,14 @@ impl XraySidecar {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Hide the xray.exe console window on Windows. Without this the
+        // sidecar pops a visible console behind the Tauri tray app for
+        // the lifetime of the connection.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
         let mut child = command.spawn().map_err(|e| {
             tracing::error!(target: "xray-spawn", "spawn failed: {e}");
             SidecarError::Spawn(e)
