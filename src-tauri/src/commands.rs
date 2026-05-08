@@ -282,6 +282,13 @@ fn ensure_sidecar(state: &State<'_, AppState>, app: &AppHandle) -> Result<XraySi
     if let Ok(p) = crate::runtime::pid_file_path(app, "xray.pid") {
         sidecar.set_pid_file(p);
     }
+    // Real-network gate on Connected: xray happily prints its startup
+    // banner with any syntactically-valid config — wrong credentials only
+    // surface at first-traffic time. Without this opt-in the UI would
+    // falsely report Connected for a profile that can't actually pass
+    // any traffic. Tests that drive the supervisor against the xray-stub
+    // skip this call (the stub doesn't speak SOCKS5).
+    sidecar.enable_health_probe();
     *guard = Some(sidecar.clone());
     Ok(sidecar)
 }

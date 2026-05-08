@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nexray_core::{ConnectionState, ConnectionStatus};
 use thiserror::Error;
@@ -43,6 +43,17 @@ struct Inner {
     /// `stop`/Drop remove the file. The boot-time scrubber in `lib.rs` looks
     /// for this file to terminate orphans from a prior crash.
     pid_file: Option<PathBuf>,
+    /// When true, `start` spawns a SOCKS5 round-trip probe thread that gates
+    /// the `Connecting → Connected` transition on an actual HTTP HEAD
+    /// succeeding through the proxy. xray-core happily prints its startup
+    /// banner with any syntactically-valid config — wrong password / wrong
+    /// UUID / wrong publicKey only fails at first-traffic time, so a
+    /// banner-only transition would falsely report Connected. The probe
+    /// catches that. Production calls `enable_health_probe()` after
+    /// constructing the supervisor; the test stub doesn't speak SOCKS5, so
+    /// integration tests leave it disabled and rely on the banner-driven
+    /// transition for state plumbing.
+    health_probe: bool,
 }
 
 #[derive(Debug, Error)]
@@ -73,6 +84,7 @@ impl XraySidecar {
             last_stderr_line: None,
             last_error: None,
             pid_file: None,
+            health_probe: false,
         };
         Self {
             inner: Arc::new(Mutex::new(inner)),
@@ -83,6 +95,17 @@ impl XraySidecar {
     /// removed on `stop`/Drop. `lib.rs::setup` scrubs leftover files at boot.
     pub fn set_pid_file(&self, path: PathBuf) {
         lock(&self.inner).pid_file = Some(path);
+    }
+
+    /// Opt this supervisor into the SOCKS5 health probe. See the
+    /// `health_probe` field on `Inner` for the rationale; in short, it's the
+    /// difference between "process up" and "proxy actually working", and
+    /// catches every credential misconfiguration (wrong Trojan password,
+    /// wrong VLESS UUID, wrong VMess UUID, wrong REALITY publicKey, …) that
+    /// xray-core defers to first-traffic time. Production turns this on;
+    /// integration tests against the xray-stub leave it off.
+    pub fn enable_health_probe(&self) {
+        lock(&self.inner).health_probe = true;
     }
 
     /// Path to the xray binary this supervisor spawns. Used by the
@@ -213,6 +236,12 @@ impl XraySidecar {
         }
         drop(inner);
 
+        // Snapshot whether the health probe is enabled so the reader
+        // threads (which run for the lifetime of the child) don't have to
+        // re-lock to check. The flag is set once before `start` is called
+        // and never flipped.
+        let health_probe_enabled = lock(&self.inner).health_probe;
+
         let stderr_arc = Arc::clone(&self.inner);
         thread::spawn(move || {
             let reader = BufReader::new(stderr);
@@ -226,7 +255,12 @@ impl XraySidecar {
                 tracing::warn!(target: "xray", "{line}");
                 let mut inner = lock(&stderr_arc);
                 inner.last_stderr_line = Some(line);
-                if matches!(inner.state, ConnectionState::Connecting) {
+                // Banner-driven transition only when the probe is OFF
+                // (i.e. test stub mode). Production gates Connected on a
+                // SOCKS5 round-trip succeeding through the proxy.
+                if !health_probe_enabled
+                    && matches!(inner.state, ConnectionState::Connecting)
+                {
                     inner.state = ConnectionState::Connected;
                 }
             }
@@ -255,11 +289,18 @@ impl XraySidecar {
                     {
                         inner.last_stderr_line = Some(line.clone());
                     }
-                    if matches!(inner.state, ConnectionState::Connecting) {
+                    if !health_probe_enabled
+                        && matches!(inner.state, ConnectionState::Connecting)
+                    {
                         inner.state = ConnectionState::Connected;
                     }
                 }
             });
+        }
+
+        if health_probe_enabled {
+            let probe_arc = Arc::clone(&self.inner);
+            thread::spawn(move || run_health_probe(socks_port, probe_arc));
         }
 
         Ok(())
@@ -334,6 +375,110 @@ impl Drop for Inner {
         }
         if let Some(p) = self.pid_file.as_ref() {
             let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SOCKS5 health probe
+// ---------------------------------------------------------------------------
+
+/// Probe target. An IPv4 literal so DNS-routing rules (incl. the user's
+/// `rules.conf` overrides) don't accidentally NXDOMAIN the probe and trip a
+/// false-failure on a working proxy. Cloudflare's anycast `1.1.1.1` is
+/// globally reachable; `cdn-cgi/trace` returns a small text body and a
+/// 200 status with no auth.
+const PROBE_URL: &str = "https://1.1.1.1/cdn-cgi/trace";
+
+/// Total budget for the supervisor to confirm the proxy is functional.
+/// Cold xray + first TLS handshake + upstream auth round-trip is usually
+/// under 5s; 15s leaves headroom for slow CDN edges and high-latency links.
+const PROBE_DEADLINE: Duration = Duration::from_secs(15);
+
+/// Per-attempt request timeout. Smaller than the deadline so we get
+/// multiple retries within a single deadline window.
+const PROBE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Spacing between probe attempts. xray binds the SOCKS inbound within a
+/// few hundred ms of receiving its config, so the first attempt usually
+/// gets ECONNREFUSED — we sleep + retry.
+const PROBE_RETRY_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Drives `Connecting → Connected` (probe succeeds) or `Connecting → Crashed`
+/// (probe fails within deadline). Runs in its own thread; bails immediately
+/// if the user disconnects or `status()` flips state to Crashed mid-probe.
+fn run_health_probe(socks_port: u16, inner: Arc<Mutex<Inner>>) {
+    let proxy = match reqwest::Proxy::all(format!("socks5h://127.0.0.1:{socks_port}")) {
+        Ok(p) => p,
+        Err(e) => return finalize_probe(&inner, Err(format!("proxy init: {e}"))),
+    };
+    let client = match reqwest::blocking::Client::builder()
+        .proxy(proxy)
+        .timeout(PROBE_REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::limited(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return finalize_probe(&inner, Err(format!("client init: {e}"))),
+    };
+
+    let deadline = Instant::now() + PROBE_DEADLINE;
+    let mut last_err = String::from("(no attempts)");
+
+    loop {
+        // Bail if the user disconnected or the supervisor caught a process
+        // exit and flipped to Crashed: in either case our verdict isn't wanted.
+        if !matches!(lock(&inner).state, ConnectionState::Connecting) {
+            return;
+        }
+        if Instant::now() > deadline {
+            return finalize_probe(
+                &inner,
+                Err(format!(
+                    "proxy probe timed out after {}s — likely wrong credentials \
+                     or server unreachable. Last attempt: {last_err}",
+                    PROBE_DEADLINE.as_secs()
+                )),
+            );
+        }
+        match client.head(PROBE_URL).send() {
+            Ok(res) if res.status().is_success() || res.status().is_redirection() => {
+                return finalize_probe(&inner, Ok(()));
+            }
+            Ok(res) => last_err = format!("HTTP {}", res.status()),
+            Err(e) => last_err = e.to_string(),
+        }
+        thread::sleep(PROBE_RETRY_INTERVAL);
+    }
+}
+
+fn finalize_probe(inner: &Arc<Mutex<Inner>>, result: Result<(), String>) {
+    let mut g = lock(inner);
+    // Only transition if we're still Connecting. The user might have
+    // disconnected, or status() might have caught a process exit and
+    // flipped to Crashed; either way, don't overwrite.
+    if !matches!(g.state, ConnectionState::Connecting) {
+        return;
+    }
+    match result {
+        Ok(()) => {
+            tracing::info!(target: "xray-probe", "proxy reachable — transitioning to Connected");
+            g.state = ConnectionState::Connected;
+        }
+        Err(e) => {
+            tracing::warn!(target: "xray-probe", "probe failed: {e} — transitioning to Crashed");
+            g.state = ConnectionState::Crashed;
+            g.last_error = Some(e);
+            // The xray child is still alive but functionally useless; tear
+            // it down so the next Connect can start fresh without leaking
+            // a defunct sidecar.
+            if let Some(mut child) = g.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            if let Some(p) = g.pid_file.as_ref() {
+                let _ = std::fs::remove_file(p);
+            }
         }
     }
 }
