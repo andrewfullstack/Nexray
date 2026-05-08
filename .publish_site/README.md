@@ -2,7 +2,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md)
 
-Modern, minimal VLESS proxy client for macOS, Linux, and Windows.
+Modern, minimal VLESS + Trojan proxy client for macOS, Linux, and Windows.
 Tray-app simple, kernel-grade fast.
 
 ## Download
@@ -42,8 +42,9 @@ launch of each version.
 
 ## Highlights
 
-- **VLESS only.** Refuses VMess, Shadowsocks, Trojan, and every other legacy
-  or insecure-by-default combination — by design.
+- **Modern protocols only.** VLESS (CDN-WS or REALITY) and Trojan (TCP+TLS).
+  Refuses VMess, Shadowsocks, and every other legacy or insecure-by-default
+  combination — by design.
 - **Subscription import** with per-group **Auto** mode that probes latency
   and pins the active server to the fastest member of the group.
 - **Smart routing.** Built-in `geosite:cn` rules + your own `rules.conf`.
