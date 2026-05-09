@@ -335,7 +335,7 @@ fn resolve_xray_path(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("NEXRAY_XRAY_BIN") {
         let path = PathBuf::from(p);
         if path.exists() {
-            return Ok(path);
+            return Ok(normalize_path_for_spawn(path));
         }
     }
 
@@ -343,26 +343,26 @@ fn resolve_xray_path(app: &AppHandle) -> Result<PathBuf, String> {
     let resource_root = resource_dir.join("binaries");
     let bundled = resource_root.join(bin);
     if bundled.exists() {
-        return Ok(bundled);
+        return Ok(normalize_path_for_spawn(bundled));
     }
     if let Some(p) = find_in_subdirs(&resource_root, bin) {
-        return Ok(p);
+        return Ok(normalize_path_for_spawn(p));
     }
 
     let dev_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
     let dev = dev_root.join(bin);
     if dev.exists() {
-        return Ok(dev);
+        return Ok(normalize_path_for_spawn(dev));
     }
     if let Some(p) = find_in_subdirs(&dev_root, bin) {
-        return Ok(p);
+        return Ok(normalize_path_for_spawn(p));
     }
 
     if let Some(p) = find_on_path(bin) {
-        return Ok(p);
+        return Ok(normalize_path_for_spawn(p));
     }
 
-    Ok(bundled)
+    Ok(normalize_path_for_spawn(bundled))
 }
 
 /// One-level-deep scan: look for `<root>/<any-subdir>/<bin>`. Used to find
@@ -393,6 +393,29 @@ fn find_on_path(bin: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Strip the Windows extended-length path prefix (`\\?\`) so spawned
+/// children get a "normal" path. CreateProcess accepts `\\?\` form, but
+/// some libraries (notably Wintun.dll's LoadLibrary path resolution
+/// inside tun2socks) fail to find sibling DLLs when the executable's
+/// path starts with `\\?\` — Tauri's `resource_dir()` returns
+/// canonicalized paths in this form, which broke TUN start on Windows
+/// even though the same path worked fine for plain xray-core. No-op on
+/// non-Windows platforms.
+fn normalize_path_for_spawn(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            // Don't touch `\\?\UNC\server\share\…` — that's the long-path
+            // form of a UNC path and stripping the prefix would break it.
+            if !rest.starts_with("UNC\\") {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    p
 }
 
 fn profile_id(p: &Profile) -> &str {
@@ -785,7 +808,7 @@ fn resolve_tun_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("NEXRAY_TUN2SOCKS_BIN") {
         let path = PathBuf::from(p);
         if path.exists() {
-            return Ok(path);
+            return Ok(normalize_path_for_spawn(path));
         }
     }
 
@@ -793,26 +816,26 @@ fn resolve_tun_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
     let resource_root = resource_dir.join("binaries");
     let bundled = resource_root.join(bin);
     if bundled.exists() {
-        return Ok(bundled);
+        return Ok(normalize_path_for_spawn(bundled));
     }
     if let Some(p) = find_in_subdirs(&resource_root, bin) {
-        return Ok(p);
+        return Ok(normalize_path_for_spawn(p));
     }
 
     let dev_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
     let dev = dev_root.join(bin);
     if dev.exists() {
-        return Ok(dev);
+        return Ok(normalize_path_for_spawn(dev));
     }
     if let Some(p) = find_in_subdirs(&dev_root, bin) {
-        return Ok(p);
+        return Ok(normalize_path_for_spawn(p));
     }
 
     if let Some(p) = find_on_path(bin) {
-        return Ok(p);
+        return Ok(normalize_path_for_spawn(p));
     }
 
-    Ok(bundled)
+    Ok(normalize_path_for_spawn(bundled))
 }
 
 fn disabled_tun() -> TunStatus {
