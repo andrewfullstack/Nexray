@@ -1432,6 +1432,19 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
            }}\n\
          }}\n\
          \n\
+         # Force the Wintun adapter offline so Windows immediately\n\
+         # re-routes traffic through Ethernet / Wi-Fi. Without this the\n\
+         # adapter can linger as the primary interface — we lowered its\n\
+         # metric to 1 at start-up, so even after our routes are gone\n\
+         # the OS keeps showing nexray-tun as the \"Connected\" network\n\
+         # until the device fully unregisters. Disabling forces it down\n\
+         # synchronously; if tun2socks already removed the adapter, the\n\
+         # cmdlet errors harmlessly under SilentlyContinue.\n\
+         if ($Adapter) {{\n\
+           Disable-NetAdapter -Name $IFACE -Confirm:$false -ErrorAction SilentlyContinue\n\
+           \"disabled Wintun adapter $IFACE — traffic returns to default route\" | Add-Content $LOG\n\
+         }}\n\
+         \n\
          # Defensive: confirm the original default route is back. Less\n\
          # likely to be needed on Windows than on Linux (no NM-equivalent\n\
          # withdrawing the user's default when our split-default appears),\n\
