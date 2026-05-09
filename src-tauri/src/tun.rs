@@ -388,6 +388,7 @@ impl TunSupervisor {
 /// EPERM if alive but root-owned (good — still alive), ESRCH if gone.
 /// Without root-signal permission we shell out to `ps` which doesn't care
 /// about the target's UID.
+#[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     Command::new("/bin/ps")
         .args(["-p", &pid.to_string()])
@@ -397,6 +398,44 @@ fn process_alive(pid: u32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// Windows liveness check. The Unix `ps` shell-out doesn't exist on Windows
+/// — `Command::new("/bin/ps").status()` returns Err, the unwrap_or(false)
+/// reads it as "process dead", and the supervisor incorrectly transitions
+/// to `Failed` with "tun2socks exited unexpectedly" while TUN is in fact
+/// running. `tasklist /FI "PID eq <pid>"` is the standard Windows
+/// equivalent; with /FO CSV /NH, an alive process produces a single CSV
+/// row, a dead PID produces empty output (and the "INFO: No tasks" message
+/// goes to stderr, which we discard). CREATE_NO_WINDOW suppresses the
+/// per-poll console flicker.
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    let output = Command::new("tasklist")
+        .args([
+            "/FI",
+            &format!("PID eq {pid}"),
+            "/FO",
+            "CSV",
+            "/NH",
+        ])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            // CSV row format: "image.exe","12345","Console","1","12,345 K"
+            // Match the PID as a quoted CSV field to avoid false positives
+            // from PIDs that happen to be substrings of the image name or
+            // memory column. The leading `"` after `,` reliably anchors it.
+            let s = String::from_utf8_lossy(&out.stdout);
+            s.contains(&format!("\"{pid}\""))
+        }
+        _ => false,
+    }
 }
 
 fn wait_for_path_gone(path: &Path, timeout: std::time::Duration) {
