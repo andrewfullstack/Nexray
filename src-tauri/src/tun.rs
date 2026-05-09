@@ -1298,6 +1298,26 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
          \"LOCAL_GW=$LOCAL_GW IDX=$LOCAL_IDX  LOCAL_GW6=$LOCAL_GW6 IDX6=$LOCAL_IDX6\" | Add-Content $LOG\n\
          '--- tun2socks output below ---' | Add-Content $LOG\n\
          \n\
+         # Cleanup any leftover Wintun adapter from a previous session\n\
+         # that didn't tear down cleanly. Two cases:\n\
+         #   - v3.2.5 Stop left it in Disabled state. tun2socks would\n\
+         #     find the adapter, refuse to recreate it, fail fast — and\n\
+         #     race the supervisor pidfile poll, surfacing as \"TUN\n\
+         #     Start failed without auth\".\n\
+         #   - v3.2.4 had no teardown at all and left the adapter\n\
+         #     Enabled but with stale routing/state. Same outcome.\n\
+         # Re-enable any existing same-named adapter so tun2socks can\n\
+         # claim it cleanly instead of fighting it.\n\
+         $existing = Get-NetAdapter -Name $IFACE -ErrorAction SilentlyContinue\n\
+         if ($existing) {{\n\
+           \"found leftover $IFACE adapter (status=$($existing.Status)) from a previous session\" | Add-Content $LOG\n\
+           if ($existing.Status -eq 'Disabled') {{\n\
+             Enable-NetAdapter -Name $IFACE -Confirm:$false -ErrorAction SilentlyContinue\n\
+             'pre-spawn: re-enabled the leftover adapter' | Add-Content $LOG\n\
+             Start-Sleep -Milliseconds 500\n\
+           }}\n\
+         }}\n\
+         \n\
          # Spawn tun2socks. Start-Process refuses to redirect both stdout\n\
          # and stderr to the same file — \"The process cannot access the\n\
          # file because it is being used by another process\" — so we\n\
@@ -1313,7 +1333,7 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
            -RedirectStandardOutput $STDOUT_LOG -RedirectStandardError $STDERR_LOG `\n\
            -WindowStyle Hidden -PassThru\n\
          if (-not $proc) {{\n\
-           'ERROR: Start-Process for tun2socks returned null — aborting' | Add-Content $LOG\n\
+           'ERROR: Start-Process for tun2socks returned null; aborting' | Add-Content $LOG\n\
            Remove-Item -Force $PIDFILE -ErrorAction SilentlyContinue\n\
            Remove-Item -Force $IFACE_FILE -ErrorAction SilentlyContinue\n\
            exit 1\n\
@@ -1442,7 +1462,7 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
          # cmdlet errors harmlessly under SilentlyContinue.\n\
          if ($Adapter) {{\n\
            Disable-NetAdapter -Name $IFACE -Confirm:$false -ErrorAction SilentlyContinue\n\
-           \"disabled Wintun adapter $IFACE — traffic returns to default route\" | Add-Content $LOG\n\
+           \"disabled Wintun adapter $IFACE; traffic returns to default route\" | Add-Content $LOG\n\
          }}\n\
          \n\
          # Defensive: confirm the original default route is back. Less\n\
