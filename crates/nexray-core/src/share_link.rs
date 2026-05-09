@@ -290,13 +290,19 @@ fn decode_vmess(raw: &str) -> DecodeResult {
         Some(i) => (&body[..i], Some(&body[i + 1..])),
         None => (body, None),
     };
-    let normalized: String = b64_part.chars().map(|c| match c {
-        '-' => '+',
-        '_' => '/',
-        other => other,
-    }).collect();
+    let normalized: String = b64_part
+        .chars()
+        .map(|c| match c {
+            '-' => '+',
+            '_' => '/',
+            other => other,
+        })
+        .collect();
     let pad_needed = (4 - (normalized.len() % 4)) % 4;
-    let padded: String = normalized.chars().chain(std::iter::repeat('=').take(pad_needed)).collect();
+    let padded: String = normalized
+        .chars()
+        .chain(std::iter::repeat('=').take(pad_needed))
+        .collect();
     if !is_strict_b64(&padded) {
         return err(SkipReason::Malformed, raw);
     }
@@ -324,7 +330,11 @@ fn decode_vmess(raw: &str) -> DecodeResult {
     //   aid  = alterId (must 0)  sni  = TLS SNI
     //   scy  = cipher            alpn = comma-joined list
     //   ps   = remark            fp   = uTLS fingerprint
-    let address = obj.get("add").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let address = obj
+        .get("add")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let port_value = obj.get("port");
     let port: u16 = match port_value {
         Some(serde_json::Value::Number(n)) => match n.as_u64() {
@@ -337,7 +347,11 @@ fn decode_vmess(raw: &str) -> DecodeResult {
         },
         _ => return err(SkipReason::Malformed, raw),
     };
-    let uuid = obj.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let uuid = obj
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if address.is_empty() || uuid.is_empty() {
         return err(SkipReason::Malformed, raw);
     }

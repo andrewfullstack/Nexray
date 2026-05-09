@@ -266,9 +266,7 @@ impl XraySidecar {
                 // Banner-driven transition only when the probe is OFF
                 // (i.e. test stub mode). Production gates Connected on a
                 // SOCKS5 round-trip succeeding through the proxy.
-                if !health_probe_enabled
-                    && matches!(inner.state, ConnectionState::Connecting)
-                {
+                if !health_probe_enabled && matches!(inner.state, ConnectionState::Connecting) {
                     inner.state = ConnectionState::Connected;
                 }
             }
@@ -297,9 +295,7 @@ impl XraySidecar {
                     {
                         inner.last_stderr_line = Some(line.clone());
                     }
-                    if !health_probe_enabled
-                        && matches!(inner.state, ConnectionState::Connecting)
-                    {
+                    if !health_probe_enabled && matches!(inner.state, ConnectionState::Connecting) {
                         inner.state = ConnectionState::Connected;
                     }
                 }
@@ -417,9 +413,10 @@ const PROBE_URLS: &[&str] = &[
 ];
 
 /// Total budget for the supervisor to confirm the proxy is functional.
-/// 15s lets us iterate the URL list ~1.5 times, accounting for cold xray
-/// startup + TLS handshake + auth round-trip on the first attempt.
-const PROBE_DEADLINE: Duration = Duration::from_secs(15);
+/// 30s gives us several full cycles through the URL list, accounting for
+/// cold xray startup + TLS handshake + auth round-trip on the first attempt
+/// and tolerating slow links / lossy upstreams without false-failing.
+const PROBE_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Per-attempt request timeout. Smaller than the deadline so a single slow
 /// destination doesn't gobble the whole budget; the loop falls through to
@@ -429,7 +426,7 @@ const PROBE_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 /// Spacing between probe attempts. xray binds the SOCKS inbound within a
 /// few hundred ms of receiving its config, so the first attempt usually
 /// gets ECONNREFUSED — we sleep + retry.
-const PROBE_RETRY_INTERVAL: Duration = Duration::from_millis(500);
+const PROBE_RETRY_INTERVAL: Duration = Duration::from_millis(1000);
 
 /// Drives `Connecting → Connected` (probe succeeds) or `Connecting → Crashed`
 /// (probe fails within deadline). Runs in its own thread; bails immediately

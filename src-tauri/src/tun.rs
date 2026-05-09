@@ -84,6 +84,11 @@ struct Inner {
     since_ms: Option<u64>,
     last_error: Option<String>,
     pid_file: Option<PathBuf>,
+    /// Where to persist the per-session TunSnapshot (set externally via
+    /// `set_snapshot_path`). Written on successful privileged enable;
+    /// removed in `disable()` and `Drop`. The host-side orphan check at
+    /// next launch reads this file to detect crashed sessions.
+    snapshot_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Error)]
@@ -110,6 +115,7 @@ impl TunSupervisor {
             since_ms: None,
             last_error: None,
             pid_file: None,
+            snapshot_path: None,
         };
         Self {
             inner: Arc::new(Mutex::new(inner)),
@@ -118,6 +124,10 @@ impl TunSupervisor {
 
     pub fn set_pid_file(&self, path: PathBuf) {
         lock(&self.inner).pid_file = Some(path);
+    }
+
+    pub fn set_snapshot_path(&self, path: PathBuf) {
+        lock(&self.inner).snapshot_path = Some(path);
     }
 
     /// Enable TUN by spawning tun2socks pointed at `socks_addr` (e.g.
@@ -273,6 +283,7 @@ impl TunSupervisor {
                     .filter(|s| !s.is_empty())
                     .unwrap_or(iface_owned);
 
+                let launcher_pid = child.id();
                 inner.state = TunState::Active;
                 inner.launcher = Some(child);
                 inner.privileged_pid = Some(pid);
@@ -284,6 +295,20 @@ impl TunSupervisor {
                 inner.last_error = None;
                 if let Some(p) = inner.pid_file.as_ref() {
                     let _ = std::fs::write(p, pid.to_string());
+                }
+                if let Some(snapshot_path) = inner.snapshot_path.clone() {
+                    let snapshot = crate::runtime::TunSnapshot {
+                        launcher_pid,
+                        iface: inner.interface_name.clone().unwrap_or_default(),
+                        sigfile: inner.sigfile.clone().unwrap_or_default(),
+                        pidfile: inner.privileged_pidfile.clone(),
+                        log: inner.log_path.clone(),
+                        iface_file: Some(iface_file),
+                        script: None,
+                        since_ms: inner.since_ms.unwrap_or_default(),
+                        platform: std::env::consts::OS.to_string(),
+                    };
+                    crate::runtime::write_tun_snapshot(&snapshot_path, &snapshot);
                 }
             }
         }
@@ -321,6 +346,9 @@ impl TunSupervisor {
         inner.privileged_pid = None;
         if let Some(p) = inner.pid_file.as_ref() {
             let _ = std::fs::remove_file(p);
+        }
+        if let Some(p) = inner.snapshot_path.as_ref() {
+            crate::runtime::delete_tun_snapshot(p);
         }
         inner.state = TunState::Disabled;
         inner.interface_name = None;
@@ -413,13 +441,7 @@ fn process_alive(pid: u32) -> bool {
 fn process_alive(pid: u32) -> bool {
     use std::os::windows::process::CommandExt;
     let output = Command::new("tasklist")
-        .args([
-            "/FI",
-            &format!("PID eq {pid}"),
-            "/FO",
-            "CSV",
-            "/NH",
-        ])
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -470,6 +492,9 @@ impl Drop for Inner {
         }
         if let Some(p) = &self.pid_file {
             let _ = std::fs::remove_file(p);
+        }
+        if let Some(p) = &self.snapshot_path {
+            crate::runtime::delete_tun_snapshot(p);
         }
     }
 }

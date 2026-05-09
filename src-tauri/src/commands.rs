@@ -782,6 +782,9 @@ fn ensure_tun(state: &State<'_, AppState>, app: &AppHandle) -> Result<TunSupervi
     if let Ok(p) = crate::runtime::pid_file_path(app, "tun2socks.pid") {
         supervisor.set_pid_file(p);
     }
+    if let Ok(p) = crate::runtime::tun_snapshot_path(app) {
+        supervisor.set_snapshot_path(p);
+    }
     *guard = Some(supervisor.clone());
     Ok(supervisor)
 }

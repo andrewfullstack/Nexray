@@ -34,6 +34,38 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state::AppState::default())
+        .on_window_event(|window, event| {
+            // Force-quit / Cmd+Q / clicking the close button bypasses the
+            // user's "Stop TUN" / "Disable proxy" buttons. Without this
+            // handler the network state we installed (split-default routes,
+            // Wintun adapter, system SOCKS settings) is left at the mercy of
+            // best-effort `Drop` impls — and the privileged TUN launcher's
+            // Drop currently SIGKILLs the elevation wrapper before its bash
+            // poll loop can see the sigfile, skipping route teardown entirely.
+            // Calling the explicit disable paths here gives each supervisor
+            // its own up-to-3s clean-shutdown window before the runtime tears
+            // everything down.
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                let app = window.app_handle();
+                let state = app.state::<state::AppState>();
+                if let Some(sv) = state.tun.lock().ok().and_then(|g| g.clone()) {
+                    if let Err(e) = sv.disable() {
+                        tracing::warn!(
+                            target: "shutdown",
+                            "TUN clean shutdown on window close failed: {e}",
+                        );
+                    }
+                }
+                if state.system_proxy.status().enabled {
+                    if let Err(e) = state.system_proxy.disable() {
+                        tracing::warn!(
+                            target: "shutdown",
+                            "system-proxy clean shutdown on window close failed: {e}",
+                        );
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::connect,
