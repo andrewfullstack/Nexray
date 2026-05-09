@@ -1269,9 +1269,9 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
          # lands at teardown for failure-investigation purposes.\n\
          $STDOUT_LOG = \"$LOG.tun2socks.stdout\"\n\
          $STDERR_LOG = \"$LOG.tun2socks.stderr\"\n\
-         $proc = Start-Process -FilePath $BIN \\\n\
-           -ArgumentList @('-device', $IFACE, '-proxy', $PROXY, '-loglevel', 'warn') \\\n\
-           -RedirectStandardOutput $STDOUT_LOG -RedirectStandardError $STDERR_LOG \\\n\
+         $proc = Start-Process -FilePath $BIN `\n\
+           -ArgumentList @('-device', $IFACE, '-proxy', $PROXY, '-loglevel', 'warn') `\n\
+           -RedirectStandardOutput $STDOUT_LOG -RedirectStandardError $STDERR_LOG `\n\
            -WindowStyle Hidden -PassThru\n\
          if (-not $proc) {{\n\
            'ERROR: Start-Process for tun2socks returned null — aborting' | Add-Content $LOG\n\
@@ -1298,7 +1298,7 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
            \n\
            # Bring up + assign IPv4 + IPv6 ULA addresses.\n\
            Set-NetIPInterface -InterfaceIndex $TUN_IDX -InterfaceMetric 1 -ErrorAction SilentlyContinue\n\
-           New-NetIPAddress -InterfaceIndex $TUN_IDX -IPAddress $TUN_IP -PrefixLength 30 \\\n\
+           New-NetIPAddress -InterfaceIndex $TUN_IDX -IPAddress $TUN_IP -PrefixLength 30 `\n\
              -ErrorAction SilentlyContinue | Out-Null\n\
            \"New-NetIPAddress $TUN_IP/30 idx=$TUN_IDX\" | Add-Content $LOG\n\
            \n\
@@ -1309,13 +1309,13 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
              if ($IP -eq '') {{ continue }}\n\
              if ($IP -match ':') {{\n\
                if ($LOCAL_IDX6 -and $LOCAL_GW6) {{\n\
-                 New-NetRoute -DestinationPrefix \"$IP/128\" -InterfaceIndex $LOCAL_IDX6 \\\n\
+                 New-NetRoute -DestinationPrefix \"$IP/128\" -InterfaceIndex $LOCAL_IDX6 `\n\
                    -NextHop $LOCAL_GW6 -ErrorAction SilentlyContinue | Out-Null\n\
                  \"bypass v6: $IP -> $LOCAL_GW6 (idx $LOCAL_IDX6)\" | Add-Content $LOG\n\
                }}\n\
              }} else {{\n\
                if ($LOCAL_IDX -and $LOCAL_GW) {{\n\
-                 New-NetRoute -DestinationPrefix \"$IP/32\" -InterfaceIndex $LOCAL_IDX \\\n\
+                 New-NetRoute -DestinationPrefix \"$IP/32\" -InterfaceIndex $LOCAL_IDX `\n\
                    -NextHop $LOCAL_GW -ErrorAction SilentlyContinue | Out-Null\n\
                  \"bypass v4: $IP -> $LOCAL_GW (idx $LOCAL_IDX)\" | Add-Content $LOG\n\
                }}\n\
@@ -1324,13 +1324,13 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
            \n\
            # Split-default trick: 0/1 + 128/1 beat the existing default\n\
            # by specificity. NextHop is unset → routes are interface-scoped.\n\
-           New-NetRoute -DestinationPrefix '0.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+           New-NetRoute -DestinationPrefix '0.0.0.0/1' -InterfaceIndex $TUN_IDX `\n\
              -NextHop $TUN_IP -ErrorAction SilentlyContinue | Out-Null\n\
-           New-NetRoute -DestinationPrefix '128.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+           New-NetRoute -DestinationPrefix '128.0.0.0/1' -InterfaceIndex $TUN_IDX `\n\
              -NextHop $TUN_IP -ErrorAction SilentlyContinue | Out-Null\n\
-           New-NetRoute -DestinationPrefix '::/1' -InterfaceIndex $TUN_IDX \\\n\
+           New-NetRoute -DestinationPrefix '::/1' -InterfaceIndex $TUN_IDX `\n\
              -ErrorAction SilentlyContinue | Out-Null\n\
-           New-NetRoute -DestinationPrefix '8000::/1' -InterfaceIndex $TUN_IDX \\\n\
+           New-NetRoute -DestinationPrefix '8000::/1' -InterfaceIndex $TUN_IDX `\n\
              -ErrorAction SilentlyContinue | Out-Null\n\
            \"split-default routes installed via $IFACE (idx $TUN_IDX)\" | Add-Content $LOG\n\
          }} else {{\n\
@@ -1375,13 +1375,13 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
          # the Wintun adapter typically vanishes with tun2socks, taking\n\
          # its routes with it.\n\
          if ($Adapter) {{\n\
-           Remove-NetRoute -DestinationPrefix '0.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+           Remove-NetRoute -DestinationPrefix '0.0.0.0/1' -InterfaceIndex $TUN_IDX `\n\
              -Confirm:$false -ErrorAction SilentlyContinue\n\
-           Remove-NetRoute -DestinationPrefix '128.0.0.0/1' -InterfaceIndex $TUN_IDX \\\n\
+           Remove-NetRoute -DestinationPrefix '128.0.0.0/1' -InterfaceIndex $TUN_IDX `\n\
              -Confirm:$false -ErrorAction SilentlyContinue\n\
-           Remove-NetRoute -DestinationPrefix '::/1' -InterfaceIndex $TUN_IDX \\\n\
+           Remove-NetRoute -DestinationPrefix '::/1' -InterfaceIndex $TUN_IDX `\n\
              -Confirm:$false -ErrorAction SilentlyContinue\n\
-           Remove-NetRoute -DestinationPrefix '8000::/1' -InterfaceIndex $TUN_IDX \\\n\
+           Remove-NetRoute -DestinationPrefix '8000::/1' -InterfaceIndex $TUN_IDX `\n\
              -Confirm:$false -ErrorAction SilentlyContinue\n\
          }}\n\
          foreach ($IP in ($BYPASS_IPS_RAW -split ' ')) {{\n\
@@ -1403,7 +1403,7 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
              Where-Object {{ $_.ifIndex -ne $TUN_IDX }} | \
              Sort-Object -Property RouteMetric | Select-Object -First 1\n\
          if (-not $NowDef4 -and $LOCAL_IDX -and $LOCAL_GW) {{\n\
-           New-NetRoute -DestinationPrefix '0.0.0.0/0' -InterfaceIndex $LOCAL_IDX \\\n\
+           New-NetRoute -DestinationPrefix '0.0.0.0/0' -InterfaceIndex $LOCAL_IDX `\n\
              -NextHop $LOCAL_GW -ErrorAction SilentlyContinue | Out-Null\n\
            \"restored IPv4 default: via $LOCAL_GW idx=$LOCAL_IDX\" | Add-Content $LOG\n\
          }}\n\
@@ -1411,7 +1411,7 @@ pub fn build_launcher_script_windows(p: LauncherPaths<'_>) -> String {
              Where-Object {{ $_.ifIndex -ne $TUN_IDX }} | \
              Sort-Object -Property RouteMetric | Select-Object -First 1\n\
          if (-not $NowDef6 -and $LOCAL_IDX6 -and $LOCAL_GW6) {{\n\
-           New-NetRoute -DestinationPrefix '::/0' -InterfaceIndex $LOCAL_IDX6 \\\n\
+           New-NetRoute -DestinationPrefix '::/0' -InterfaceIndex $LOCAL_IDX6 `\n\
              -NextHop $LOCAL_GW6 -ErrorAction SilentlyContinue | Out-Null\n\
            \"restored IPv6 default: via $LOCAL_GW6 idx=$LOCAL_IDX6\" | Add-Content $LOG\n\
          }}\n\
