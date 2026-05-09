@@ -114,6 +114,28 @@ const TUN2SOCKS = {
 };
 
 /**
+ * Wintun.dll — required by tun2socks on Windows for the kernel TUN
+ * device. xjasonlyu/tun2socks's release zips ship just the .exe, so
+ * without this bundling step tun2socks can only start when wintun.dll
+ * happens to be on the user's system PATH (e.g. WireGuard installs it).
+ * Pin a specific Wintun release version + sha256; the archive contains
+ * one DLL per arch under wintun/bin/<arch>/wintun.dll — we extract the
+ * matching one and drop it next to tun2socks.exe.
+ *
+ * Wintun versions older than 0.14 had known crashes; 0.14.1 is the
+ * current stable. Update both the URL and sha256 in the same commit.
+ */
+const WINTUN_URL =
+  "https://www.wintun.net/builds/wintun-0.14.1.zip";
+const WINTUN_ZIP_SHA256 =
+  "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51";
+// Per-target arch subfolder inside the zip — wintun/bin/<arch>/wintun.dll.
+const WINTUN_ARCH_BY_TRIPLE = {
+  "x86_64-pc-windows-msvc": "amd64",
+  "aarch64-pc-windows-msvc": "arm64",
+};
+
+/**
  * geoip / geosite databases. Bundled alongside xray-core at
  * `src-tauri/binaries/data/`. xray-core resolves rule values like
  * `geosite:cn` against these files, so they MUST be present at runtime.
@@ -159,6 +181,7 @@ async function main() {
     }
     await fetchOne(triple);
     await fetchTun2socksOne(triple);
+    await fetchWintunOne(triple);
   }
 
   // geoip / geosite are platform-independent; fetch once into a shared dir.
@@ -273,6 +296,46 @@ async function fetchTun2socksOne(triple) {
     );
   }
   console.error(`[fetch-core] tun2socks ${triple}: ok`);
+}
+
+async function fetchWintunOne(triple) {
+  const arch = WINTUN_ARCH_BY_TRIPLE[triple];
+  if (!arch) {
+    // Non-Windows triple — Wintun is a Windows-only DLL.
+    return;
+  }
+  const targetDir = resolve(BIN_DIR, triple);
+  const targetDll = resolve(targetDir, "wintun.dll");
+
+  console.error(`[fetch-core] wintun ${triple} (${arch}): ${WINTUN_URL}`);
+  const zipBytes = await download(WINTUN_URL);
+  const actual = sha256Hex(zipBytes);
+  if (actual !== WINTUN_ZIP_SHA256) {
+    throw new Error(
+      `SHA-256 mismatch for wintun-0.14.1.zip\n` +
+        `  expected: ${WINTUN_ZIP_SHA256}\n  actual:   ${actual}`,
+    );
+  }
+
+  await mkdir(targetDir, { recursive: true });
+  const zipPath = resolve(targetDir, "wintun.zip");
+  await writeFile(zipPath, zipBytes);
+  // Extract the whole archive into a scratch dir, then promote just the
+  // single arch-specific DLL we need so we don't ship the unrelated
+  // x86 / arm32 builds + headers + .cat alongside tun2socks.exe.
+  const scratch = resolve(targetDir, ".wintun-scratch");
+  await mkdir(scratch, { recursive: true });
+  await unzip(zipPath, scratch);
+  await rm(zipPath);
+  const sourceDll = resolve(scratch, "wintun", "bin", arch, "wintun.dll");
+  if (!existsSync(sourceDll)) {
+    throw new Error(
+      `wintun.dll not found in archive at expected path: ${sourceDll}`,
+    );
+  }
+  await rename(sourceDll, targetDll);
+  await rm(scratch, { recursive: true, force: true });
+  console.error(`[fetch-core] wintun ${triple}: ok`);
 }
 
 async function fetchGeoData() {
